@@ -447,6 +447,8 @@ def test(model_path):
 
         trX_dir = test_data
         trX = os.listdir(trX_dir)
+        score_list = []
+        file_name_list = []
 
         for f_name in trX:
             imgs_X = load_images([f_name], base_dir=trX_dir, use_augmentation=False)
@@ -477,7 +479,16 @@ def test(model_path):
             di = util.patch_compare(decoded_images_X2Y,  composed_img, patch_size=[32, 32])
             di = np.array(di)
             score = np.sqrt(np.sum(np.square(di)))
-            print('Hardness: ' + f_name + ', ' + str(score))
+            score_list.append(score)
+            file_name_list.append(f_name)
+
+        score_list = np.array(score_list)
+        score_index = np.argsort(score_list)
+        score_list = np.sort(score_list)
+
+    for i in range(len(score_list)):
+        score = score_list[i]
+        print('Hardness: ' + file_name_list[score_index[i]] + ', ' + str(score))
 
 
 if __name__ == '__main__':
