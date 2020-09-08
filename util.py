@@ -1,5 +1,7 @@
 # ==============================================================================
 # Author: Seongho Baek
+# Contact: seonghobaek@gmail.com
+#
 # ==============================================================================
 
 import math
@@ -129,8 +131,6 @@ def mkdirP(path):
 
 
 def patch_compare(img1, img2, patch_size=[4, 4]):
-    print(img2.shape)
-
     img1_h, img1_w = img1.shape
     img2_h, img2_w = img2.shape
     img_w = np.min([img1_w, img2_w])
