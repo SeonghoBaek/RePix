@@ -460,7 +460,8 @@ def test(model_path):
             decoded_images_X2Y = (decoded_images_X2Y * 128.0) + 128.0
             decoded_images_X2Y = cv2.cvtColor(decoded_images_X2Y, cv2.COLOR_BGR2GRAY)
             decoded_images_X2Y = np.array(decoded_images_X2Y, np.int32)
-            decoded_images_X2Y = ((decoded_images_X2Y + 127) / 255) * 255
+            #decoded_images_X2Y = ((decoded_images_X2Y + 127) / 255) * 255
+            decoded_images_X2Y = ((decoded_images_X2Y + intensity) / 255) * 255
             cv2.imwrite('imgs/t_' + f_name, decoded_images_X2Y)
 
             fullname = os.path.join(trX_dir, f_name).replace("\\", "/")
@@ -470,7 +471,7 @@ def test(model_path):
             composed_img = 1 + (composed_img + decoded_images_X2Y)
             composed_img[composed_img > 255] = 255
             composed_img = np.array(composed_img, np.int32)
-            composed_img = ((composed_img + 63) / 255) * 255
+            composed_img = ((composed_img + intensity) / 255) * 255
             cv2.imwrite('imgs/c_' + f_name, composed_img)
 
             cv2.imwrite('imgs/o_' + f_name, (np.squeeze(imgs_X) * 128.0) + 128.0)
@@ -498,12 +499,14 @@ if __name__ == '__main__':
     parser.add_argument('--model_path', type=str, help='model check point file path', default='./model/m.ckpt')
     parser.add_argument('--train_data', type=str, help='training data directory', default='input')
     parser.add_argument('--test_data', type=str, help='test data directory', default='test')
+    parser.add_argument('--intensity', type=int, help='intensity', default=63)
 
     args = parser.parse_args()
 
     train_data = args.train_data
     test_data = args.test_data
     model_path = args.model_path
+    intensity = args.intensity
 
     dense_block_depth = 32
 
