@@ -418,7 +418,7 @@ def train(model_path):
                 imgs_Y = load_images(trY[start:end], base_dir=trY_dir, use_augmentation=False, add_eps=False, rotate=rot)
 
                 if imgs_Y is None:
-                    break
+                    continue
 
                 if len(imgs_Y[0].shape) != 3:
                     imgs_Y = np.expand_dims(imgs_Y, axis=-1)
@@ -431,7 +431,7 @@ def train(model_path):
                 imgs_X = load_images(trX, base_dir=trX_dir, use_augmentation=True, rotate=rot)
 
                 if imgs_X is None:
-                    break
+                    continue
 
                 if len(imgs_X[0].shape) != 3:
                     imgs_X = np.expand_dims(imgs_X, axis=-1)
@@ -452,7 +452,7 @@ def train(model_path):
                     imgs_Y = load_images(trY[start:end], base_dir=trY_dir, use_augmentation=False, add_eps=False, rotate=rot)
 
                     if imgs_Y is None:
-                        break
+                        continue
 
                     if len(imgs_Y[0].shape) != 3:
                         imgs_Y = np.expand_dims(imgs_Y, axis=-1)
