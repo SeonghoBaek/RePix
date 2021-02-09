@@ -1,7 +1,6 @@
 # ==============================================================================
 # Author: Seongho Baek
 # Contact: seonghobaek@gmail.com
-#
 # ==============================================================================
 
 import tensorflow as tf
@@ -12,41 +11,55 @@ from sklearn.utils import shuffle
 import util
 import layers
 import argparse
+import time
 
 
-def load_images(file_name_list, base_dir, use_augmentation=False):
-    images = []
+def load_images(file_name_list, base_dir, use_augmentation=False, add_eps=False, rotate=-1):
+    try:
+        images = []
 
-    for file_name in file_name_list:
-        fullname = os.path.join(base_dir, file_name).replace("\\", "/")
-        img = cv2.imread(fullname)
-        # img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        img = cv2.resize(img, dsize=(input_width, input_height), interpolation=cv2.INTER_CUBIC)
+        for file_name in file_name_list:
+            fullname = os.path.join(base_dir, file_name).replace("\\", "/")
+            img = cv2.imread(fullname)
 
-        if img is not None:
-            img = np.array(img)
+            if img is None:
+                print('Load failed: ' + fullname)
+                return None
 
-            n_img = (img - 128.0) / 128.0
+            if rotate > -1:
+                img = cv2.rotate(img, rotate)
 
-            if use_augmentation is True:
-                n_img = n_img + 1e-4
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            img = cv2.resize(img, dsize=(input_width, input_height), interpolation=cv2.INTER_CUBIC)
 
-                if np.random.randint(low=0, high=10) < 5:
-                    # square cut out
-                    co_w = input_width // 10
-                    co_h = co_w
-                    padd_w = co_w // 2
-                    padd_h = padd_w
-                    r_x = np.random.randint(low=padd_w, high=input_width - padd_w)
-                    r_y = np.random.randint(low=padd_h, high=input_height - padd_h)
+            if img is not None:
+                img = np.array(img)
 
-                    for i in range(co_w):
-                        for j in range(co_h):
-                            n_img[r_x - padd_w + i][r_y - padd_h + j] = 0.0
+                n_img = (img - 128.0) / 128.0
 
-                #n_img = cv2.flip(img, 1)
-                #n_img = (n_img - 128.0) / 128.0
-            images.append(n_img)
+                if add_eps is True:
+                    n_img = n_img + np.random.uniform(low=-1/128, high=1/128, size=n_img.shape)
+
+                if use_augmentation is True:
+                    if np.random.randint(low=0, high=10) < 5:
+                        # square cut out
+                        co_w = input_width // 10
+                        co_h = co_w
+                        padd_w = co_w // 2
+                        padd_h = padd_w
+                        r_x = np.random.randint(low=padd_w, high=input_width - padd_w)
+                        r_y = np.random.randint(low=padd_h, high=input_height - padd_h)
+
+                        for i in range(co_w):
+                            for j in range(co_h):
+                                n_img[r_x - padd_w + i][r_y - padd_h + j] = 0.0
+
+                    #n_img = cv2.flip(img, 1)
+                    #n_img = (n_img - 128.0) / 128.0
+                images.append(n_img)
+    except cv2.error as e:
+        print(e)
+        return None
 
     return np.array(images)
 
@@ -102,7 +115,7 @@ def discriminator(x, activation='relu', scope='discriminator_network', norm='lay
                                              scope='gp')
             print('Discriminator GP Dims: ' + str(feature.get_shape().as_list()))
 
-            #logit = layers.conv(last_layer, scope='conv_pred', filter_dims=[3, 3, 1], stride_dims=[1, 1],
+            #logit = layers.conv(last_layer, scope='conv_pred', filter_dims=[3, 3, 1], stride_dims=[3, 3],
             #                    non_linear_fn=None, bias=False)
             logit = layers.conv(last_layer, scope='conv_pred', filter_dims=[1, 1, 1], stride_dims=[1, 1],
                                 non_linear_fn=None, bias=False)
@@ -226,24 +239,25 @@ def translator(x, activation='relu', scope='translator', norm='layer', use_upsam
             else:
                 act_func = tf.nn.sigmoid
 
-            k = 4
-            l = 20
-            bottleneck_width = 64
-            bottleneck_itr = l
-            num_iter = input_width // bottleneck_width
-            num_iter = int(np.sqrt(num_iter))
+            block_depth = dense_block_depth  # Number of channel at start
+            bottleneck_num_itr = 15  # Num of bottleneck blocks of layers
+            bottleneck_wh_ratio = 4  # Shrink to 1/8 of input image size for botteneck layers
+
+            downsample_num_itr = int(np.log2(bottleneck_wh_ratio))
+            upsample_num_itr = downsample_num_itr
+            refine_num_itr = downsample_num_itr
 
             print('Translator Input: ' + str(x.get_shape().as_list()))
-            block_depth = dense_block_depth * k
-            #x = tf.cond(b_train, lambda: util.add_gaussian_noise(x, mean=0, std=1.0), lambda: x)
-            # l = layers.conv(x, scope='conv_init', filter_dims=[7, 7, block_depth], stride_dims=[1, 1],
-            #                non_linear_fn=None, bias=False)
+
             l = layers.coord_conv(x, scope='coor_init', filter_dims=[1, 1, block_depth], stride_dims=[1, 1],
                                   non_linear_fn=None, bias=False)
             l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='norm_init')
             l = act_func(l)
 
-            for i in range(num_iter):
+            # Downsample
+            downsample_layers = []
+
+            for i in range(downsample_num_itr):
                 print('Translator Block ' + str(i) + ': ' + str(l.get_shape().as_list()))
 
                 block_depth = block_depth * 2
@@ -252,27 +266,29 @@ def translator(x, activation='relu', scope='translator', norm='layer', use_upsam
                 l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='norm_' + str(i))
                 l = act_func(l)
 
-            for i in range(bottleneck_itr):
+            # Bottleneck
+            for i in range(bottleneck_num_itr):
                 print('Bottleneck Block : ' + str(l.get_shape().as_list()))
                 l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
-                                              norm=norm, b_train=b_train, scope='bt_block_' + str(i))
+                                              norm=norm, b_train=b_train, use_dilation=True, scope='bt_block_' + str(i))
 
-            for i in range(num_iter):
+            # Upsample
+            for i in range(upsample_num_itr):
                 block_depth = block_depth // 2
 
                 if use_upsample is True:
                     w = l.get_shape().as_list()[2]
                     h = l.get_shape().as_list()[1]
                     # l = tf.image.resize_bilinear(l, (2 * h, 2 * w))
-                    l = tf.image.resize_bicubic(l, (2 * h, 2 * w))
-                    # l = tf.image.resize_nearest_neighbor(l, (2 * h, 2 * w))
+                    # l = tf.image.resize_bicubic(l, (2 * h, 2 * w))
+                    l = tf.image.resize_nearest_neighbor(l, (2 * h, 2 * w))
                     l = layers.conv(l, scope='up_' + str(i), filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
                                     non_linear_fn=None)
                     l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='up_norm_' + str(i))
                     l = act_func(l)
                     print('Upsampling ' + str(i) + ': ' + str(l.get_shape().as_list()))
 
-                    for j in range(2):
+                    for j in range(refine_num_itr):
                         l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2,
                                                       act_func=act_func, norm=norm, b_train=b_train,
                                                       scope='block_' + str(i) + '_' + str(j))
@@ -284,17 +300,25 @@ def translator(x, activation='relu', scope='translator', norm='layer', use_upsam
                     l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='deconv_norm_' + str(i))
                     l = act_func(l)
 
-            l = layers.conv(l, scope='last', filter_dims=[7, 7, num_channel], stride_dims=[1, 1],
-                            non_linear_fn=tf.nn.tanh,
-                            bias=False)
+            # Refinement
+            for i in range(refine_num_itr):
+                l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, use_dilation=True,
+                                                      act_func=act_func, norm=norm, b_train=b_train,
+                                                      scope='refine_' + str(i))
+                print('Refinement ' + str(i) + ': ' + str(l.get_shape().as_list()))
 
-            print('Translator Final: ' + str(l.get_shape().as_list()))
+            # Transform to input channels
+            l = layers.conv(l, scope='last', filter_dims=[3, 3, num_channel], stride_dims=[1, 1],
+                            dilation=[1, 2, 2, 1], non_linear_fn=tf.nn.tanh,
+                            bias=False)
 
         return l
 
 
 def train(model_path):
     print('Please wait. It takes several minutes. Do not quit!')
+
+    train_start_time = time.time()
 
     G_scope = 'translator_X_to_Y'
     DY_scope = 'discriminator_Y'
@@ -311,18 +335,18 @@ def train(model_path):
     config.gpu_options.allow_growth = True
 
     #with tf.device('/device:GPU:1'):
-    fake_Y = translator(X_IN, activation='relu', norm='instance', b_train=b_train, scope=G_scope,
+    fake_Y = translator(X_IN, activation='swish', norm='instance', b_train=b_train, scope=G_scope,
                         use_upsample=False)
 
     if use_identity_loss is True:
-        id_Y = translator(Y_IN, activation='relu', norm='instance', b_train=b_train, scope=G_scope,
+        id_Y = translator(Y_IN, activation='swish', norm='instance', b_train=b_train, scope=G_scope,
                           use_upsample=False)
 
     #with tf.device('/device:GPU:0'):
     _, Y_FAKE_IN_logit = discriminator(Y_FAKE_IN, activation='swish', norm='instance', b_train=b_train,
                                        scope=DY_scope, use_patch=True)
-    augmented_Y_IN = tf.add(Y_IN, tf.random_uniform(shape=Y_IN.get_shape(), minval=0.0, maxval=1/128))
-    _, real_Y_logit = discriminator(augmented_Y_IN, activation='swish', norm='instance', b_train=b_train,
+    #augmented_Y_IN = tf.add(Y_IN, tf.random_uniform(shape=Y_IN.get_shape(), minval=0.0, maxval=1/128))
+    _, real_Y_logit = discriminator(Y_IN, activation='swish', norm='instance', b_train=b_train,
                                     scope=DY_scope, use_patch=True)
     _, fake_Y_logit = discriminator(fake_Y, activation='swish', norm='instance', b_train=b_train,
                                     scope=DY_scope, use_patch=True)
@@ -351,10 +375,7 @@ def train(model_path):
     trans_X2Y_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=G_scope)
     trans_vars = trans_X2Y_vars
 
-    #with tf.device('/device:GPU:0'):
     disc_optimizer = tf.train.AdamOptimizer(learning_rate=LR).minimize(total_disc_loss, var_list=disc_vars)
-
-    #with tf.device('/device:GPU:1'):
     trans_optimizer = tf.train.AdamOptimizer(learning_rate=LR).minimize(total_trans_loss, var_list=trans_vars)
 
     # Launch the graph in a session
@@ -372,7 +393,7 @@ def train(model_path):
         trY_dir = os.path.join(train_data, 'Y').replace("\\", "/")
         trX = os.listdir(trX_dir)
         trY = os.listdir(trY_dir)
-        total_input_size = min(len(trX), len(trY))
+        total_input_size = min(len(trX), len(trY)) // batch_size
 
         num_augmentations = 1  # How many augmentations per 1 sample
         file_batch_size = batch_size // num_augmentations
@@ -382,7 +403,7 @@ def train(model_path):
 
         num_critic = 1
 
-        image_pool = util.ImagePool(maxsize=100)
+        image_pool = util.ImagePool(maxsize=30)
         learning_rate = 2e-4
         lr_decay_step = 30
 
@@ -393,18 +414,27 @@ def train(model_path):
             itr = 0
 
             for start, end in training_batch:
-                imgs_Y = load_images(trY[start:end], base_dir=trY_dir, use_augmentation=False)
+                rot = np.random.randint(-1, 3)
+                imgs_Y = load_images(trY[start:end], base_dir=trY_dir, use_augmentation=False, add_eps=False, rotate=rot)
+
+                if imgs_Y is None:
+                    break
+
                 if len(imgs_Y[0].shape) != 3:
-                    imgs_Y = np.expand_dims(imgs_Y, axis=3)
+                    imgs_Y = np.expand_dims(imgs_Y, axis=-1)
 
                 trX = []
                 for f_name in trY[start:end]:
                     i_name = f_name.replace('gt', 'input')
                     trX.append(i_name)
 
-                imgs_X = load_images(trX, base_dir=trX_dir, use_augmentation=True)
+                imgs_X = load_images(trX, base_dir=trX_dir, use_augmentation=True, rotate=rot)
+
+                if imgs_X is None:
+                    break
+
                 if len(imgs_X[0].shape) != 3:
-                    imgs_X = np.expand_dims(imgs_X, axis=3)
+                    imgs_X = np.expand_dims(imgs_X, axis=-1)
 
                 trans_X2Y = sess.run([fake_Y], feed_dict={X_IN: imgs_X, b_train: True})
                 pool_X2Y = image_pool(trans_X2Y[0])
@@ -419,17 +449,35 @@ def train(model_path):
                                                 Y_FAKE_IN: pool_X2Y, b_train: True, LR: learning_rate})
 
                 if itr % num_critic == 0:
+                    imgs_Y = load_images(trY[start:end], base_dir=trY_dir, use_augmentation=False, add_eps=False, rotate=rot)
+
+                    if imgs_Y is None:
+                        break
+
+                    if len(imgs_Y[0].shape) != 3:
+                        imgs_Y = np.expand_dims(imgs_Y, axis=-1)
+
                     _, t_loss, x2y_loss = sess.run([trans_optimizer, total_trans_loss, trans_loss_X2Y],
                                          feed_dict={Y_IN: imgs_Y, X_IN: imgs_X, b_train: True, LR: learning_rate})
 
                     print(util.COLORS.HEADER + 'epoch: ' + str(e) + util.COLORS.ENDC + ', ' +
                           util.COLORS.OKGREEN + 'd_loss: ' + str(d_loss) + util.COLORS.ENDC +
                           ', ' + util.COLORS.WARNING + 't_loss: ' + str(t_loss) + util.COLORS.ENDC + ', ' +
-                          util.COLORS.OKBLUE + 'x2y: ' + str(x2y_loss) + util.COLORS.ENDC)
+                          util.COLORS.OKBLUE + 'g_loss: ' + str(x2y_loss) + util.COLORS.ENDC)
+
                     decoded_images_X2Y = np.squeeze(trans_X2Y)
-                    cv2.imwrite(out_dir + '/X2Y_' + trX[0], (decoded_images_X2Y * 128.0) + 128.0)
+                    #decoded_images_X2Y[decoded_images_X2Y > -0.99] = 1.0
+                    #decoded_images_X2Y[decoded_images_X2Y <= -0.99] = -1.0
+                    final_images = (decoded_images_X2Y * 128.0) + 128.0
+                    #final_images = cv2.resize(final_images, dsize=(input_width // 2, input_height // 2), interpolation=cv2.INTER_NEAREST)
+                    #final_images = cv2.resize(final_images, dsize=(input_width * 2, input_height * 2), interpolation=cv2.INTER_NEAREST)
+                    #final_images = cv2.resize(final_images, dsize=(input_width, input_height), interpolation=cv2.INTER_NEAREST)
+                    cv2.imwrite(out_dir + '/' + trX[0], final_images[0])
 
                 itr += 1
+
+                if itr % 10 == 0:
+                    print('Elapsed Time at ' + str(cur_steps) + '/' + str(total_steps) + ' steps, ' + str(time.time() - train_start_time) + ' sec')
 
                 if itr % 200 == 0:
                     try:
@@ -444,6 +492,8 @@ def train(model_path):
                 print(util.COLORS.OKGREEN + 'Saved.' + util.COLORS.ENDC)
             except:
                 print(util.COLORS.FAIL + 'Save failed' + util.COLORS.ENDC)
+
+        print('Training Time: ' + str(time.time() - train_start_time))
 
 
 def test(model_path):
@@ -497,10 +547,10 @@ def test(model_path):
             trans_X2Y, logit = sess.run([fake_Y, d_logit], feed_dict={X_IN: imgs_X, b_train: False})
             decoded_images_X2Y = np.squeeze(trans_X2Y)
             decoded_images_X2Y = (decoded_images_X2Y * 128.0) + 128.0
-            decoded_images_X2Y = cv2.cvtColor(decoded_images_X2Y, cv2.COLOR_BGR2GRAY)
+            #decoded_images_X2Y = cv2.cvtColor(decoded_images_X2Y, cv2.COLOR_BGR2GRAY)
+            cv2.imwrite(out_dir + '/' + f_name, decoded_images_X2Y)
             decoded_images_X2Y = np.array(decoded_images_X2Y, np.int32)
             decoded_images_X2Y = ((decoded_images_X2Y + intensity) / 255) * 255
-            cv2.imwrite(out_dir + '/' + f_name, decoded_images_X2Y)
 
             fullname = os.path.join(trX_dir, f_name).replace("\\", "/")
             img = cv2.imread(fullname)
@@ -547,18 +597,17 @@ if __name__ == '__main__':
     intensity = args.intensity
     out_dir = args.out
 
-    dense_block_depth = 32
+    dense_block_depth = 64
 
     # Bottle neck(depth narrow down) depth. See Residual Dense Block and Residual Block.
-    bottleneck_depth = 32
-    batch_size = 1
+    batch_size = 2
     representation_dim = 128
 
     img_width = 256
     img_height = 256
     input_width = 256
     input_height = 256
-    num_channel = 3
+    num_channel = 1
 
     test_size = 100
     num_epoch = 300
