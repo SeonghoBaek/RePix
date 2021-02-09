@@ -1,7 +1,6 @@
 # ==============================================================================
 # Author: Seongho Baek
 # Contact: seonghobaek@gmail.com
-#
 # ==============================================================================
 
 import tensorflow as tf
@@ -372,9 +371,12 @@ def deconv(input_data, b_size, scope, filter_dims, stride_dims, padding='SAME', 
         return map
 
 
-def self_attention(x, channels, act_func=tf.nn.relu, scope='attention'):
+def self_attention(x, channels=0, act_func=tf.nn.relu, scope='attention'):
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         batch_size, height, width, num_channels = x.get_shape().as_list()
+
+        if channels == 0:
+            channels = num_channels
 
         f = conv(x, scope='f_conv', filter_dims=[1, 1, channels // 8], stride_dims=[1, 1], non_linear_fn=act_func)
         f = tf.layers.max_pooling2d(f, pool_size=2, strides=2, padding='SAME')
@@ -498,7 +500,7 @@ def instance_norm(x, scope="layer_norm", alpha_start=1.0, bias_start=0.0):
         bias = tf.get_variable('bias', [c],
                                initializer=tf.constant_initializer(bias_start), dtype=tf.float32)
 
-        mean, variance = tf.nn.moments(x, axes=[1, 2], keep_dims=True)
+        mean, variance = tf.nn.moments(x, axes=[0, 1, 2], keep_dims=True)
         eps = 1e-5
         inv = tf.rsqrt(variance + eps)
         y = alpha * ((x - mean)*inv) + bias
@@ -552,7 +554,7 @@ def add_residual_dense_block(in_layer, filter_dims, num_layers, act_func=tf.nn.r
 
 
 def add_residual_block(in_layer, filter_dims, num_layers=2, act_func=tf.nn.relu, norm='layer',
-                       b_train=False, use_residual=True, scope='residual_block', use_dilation=True,
+                       b_train=False, use_residual=True, scope='residual_block', use_dilation=False,
                        sn=False, use_bottleneck=False):
     with tf.variable_scope(scope):
         l = in_layer
@@ -578,15 +580,15 @@ def add_residual_block(in_layer, filter_dims, num_layers=2, act_func=tf.nn.relu,
 
         for i in range(num_layers - 1):
             l = add_residual_layer(l, filter_dims=[filter_dims[0], filter_dims[1], bn_depth], act_func=act_func, norm=norm, b_train=b_train,
-                                          scope='layer' + str(i), dilation=dilation, sn=sn)
+                                          scope='layer' + str(i), dilation=[1, 1, 1, 1], sn=sn)
 
         if use_dilation is True:
             dl = add_residual_layer(l, filter_dims=[filter_dims[0], filter_dims[1], bn_depth], act_func=None, norm=norm,
                                     b_train=b_train,
                                     scope='dilated_layer', dilation=dilation, sn=sn)
-            l = add_residual_layer(l, filter_dims=[filter_dims[0], filter_dims[1], bn_depth], act_func=None, norm=norm,
-                                   b_train=b_train,
-                                   scope='layer_last', dilation=dilation, sn=sn)
+            #l = add_residual_layer(l, filter_dims=[filter_dims[0], filter_dims[1], bn_depth], act_func=None, norm=norm,
+            #                       b_train=b_train,
+            #                       scope='layer_last', dilation=dilation, sn=sn)
             l = tf.add(l, dl)
         else:
             l = add_residual_layer(l, filter_dims=[filter_dims[0], filter_dims[1], bn_depth], act_func=None, norm=norm,
