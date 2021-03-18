@@ -1,6 +1,7 @@
 # ==============================================================================
 # Author: Seongho Baek
 # Contact: seonghobaek@gmail.com
+#
 # ==============================================================================
 
 import tensorflow as tf
@@ -95,7 +96,7 @@ def discriminator(x, activation='relu', scope='discriminator_network', norm='lay
             print('Discriminator Block ' + str(i) + ': ' + str(l.get_shape().as_list()))
 
             for j in range(2):
-                l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
                                               norm=norm, b_train=b_train, scope='res_block_' + str(i) + '_' + str(j))
             #block_depth = block_depth * 2
             #l = layers.conv(l, scope='tr' + str(i), filter_dims=[3, 3, block_depth], stride_dims=[2, 2],
@@ -107,7 +108,7 @@ def discriminator(x, activation='relu', scope='discriminator_network', norm='lay
             print('Discriminator Patch Block : ' + str(l.get_shape().as_list()))
 
             for i in range(2):
-                l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
                                               norm=norm, b_train=b_train, scope='patch_block_' + str(i))
 
             last_layer = l
@@ -124,7 +125,7 @@ def discriminator(x, activation='relu', scope='discriminator_network', norm='lay
             #print('Discriminator Attention Block : ' + str(l.get_shape().as_list()))
             #l = layers.self_attention(l, block_depth, act_func=act_func)
             for i in range(2):
-                l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
                                               norm=norm, b_train=b_train, scope='at_block_' + str(i))
 
             last_layer = l
@@ -257,21 +258,33 @@ def translator(x, activation='relu', scope='translator', norm='layer', use_upsam
             # Downsample
             downsample_layers = []
 
+            # Input stage
             for i in range(downsample_num_itr):
                 print('Translator Block ' + str(i) + ': ' + str(l.get_shape().as_list()))
 
                 block_depth = block_depth * 2
-                l = layers.conv(l, scope='tr' + str(i), filter_dims=[3, 3, block_depth], stride_dims=[2, 2],
+                l = layers.conv(l, scope='tr_' + str(i), filter_dims=[3, 3, block_depth], stride_dims=[2, 2],
                                 non_linear_fn=None)
                 l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='norm_' + str(i))
+                l = act_func(l)
+
+                l = layers.conv(l, scope='tr_1' + str(i), filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
+                                non_linear_fn=None)
+                l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='norm_1_' + str(i))
+                l = act_func(l)
+
+                l = layers.conv(l, scope='tr_2' + str(i), filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
+                                non_linear_fn=None)
+                l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='norm_2_' + str(i))
                 l = act_func(l)
 
             # Bottleneck
             for i in range(bottleneck_num_itr):
                 print('Bottleneck Block : ' + str(l.get_shape().as_list()))
-                l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
-                                              norm=norm, b_train=b_train, use_dilation=True, scope='bt_block_' + str(i))
-
+                #l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                #                              norm=norm, b_train=b_train, use_dilation=True, scope='bt_block_' + str(i))
+                l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                                              norm=norm, b_train=b_train, use_dilation=False, scope='bt_block_' + str(i))
             # Upsample
             for i in range(upsample_num_itr):
                 block_depth = block_depth // 2
@@ -289,7 +302,10 @@ def translator(x, activation='relu', scope='translator', norm='layer', use_upsam
                     print('Upsampling ' + str(i) + ': ' + str(l.get_shape().as_list()))
 
                     for j in range(refine_num_itr):
-                        l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2,
+                        #l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2,
+                        #                              act_func=act_func, norm=norm, b_train=b_train,
+                        #                              scope='block_' + str(i) + '_' + str(j))
+                        l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2,
                                                       act_func=act_func, norm=norm, b_train=b_train,
                                                       scope='block_' + str(i) + '_' + str(j))
                 else:
@@ -302,9 +318,12 @@ def translator(x, activation='relu', scope='translator', norm='layer', use_upsam
 
             # Refinement
             for i in range(refine_num_itr):
-                l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, use_dilation=True,
-                                                      act_func=act_func, norm=norm, b_train=b_train,
-                                                      scope='refine_' + str(i))
+                #l = layers.add_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, use_dilation=True,
+                #                                      act_func=act_func, norm=norm, b_train=b_train,
+                #                                      scope='refine_' + str(i))
+                l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, use_dilation=False,
+                                              act_func=act_func, norm=norm, b_train=b_train,
+                                              scope='refine_' + str(i))
                 print('Refinement ' + str(i) + ': ' + str(l.get_shape().as_list()))
 
             # Transform to input channels
@@ -335,20 +354,29 @@ def train(model_path):
     config.gpu_options.allow_growth = True
 
     #with tf.device('/device:GPU:1'):
-    fake_Y = translator(X_IN, activation='swish', norm='instance', b_train=b_train, scope=G_scope,
+    fake_Y = translator(X_IN, activation='relu', norm='instance', b_train=b_train, scope=G_scope,
                         use_upsample=False)
+    # Threshold 0 binarize
+    '''
+    fake_Y = tf.add(fake_Y, tf.constant(2.0, shape=fake_Y.get_shape()))
+    fake_Y = tf.divide(fake_Y, tf.constant(2.0, shape=fake_Y.get_shape()))
+    fake_Y = tf.cast(fake_Y, tf.int32)
+    fake_Y = tf.multiply(fake_Y, tf.constant(2, shape=fake_Y.get_shape()))
+    fake_Y = tf.subtract(fake_Y, tf.constant(1, shape=fake_Y.get_shape()))
+    fake_Y = tf.cast(fake_Y, tf.float32)
+    '''
 
     if use_identity_loss is True:
-        id_Y = translator(Y_IN, activation='swish', norm='instance', b_train=b_train, scope=G_scope,
+        id_Y = translator(Y_IN, activation='relu', norm='instance', b_train=b_train, scope=G_scope,
                           use_upsample=False)
 
     #with tf.device('/device:GPU:0'):
-    _, Y_FAKE_IN_logit = discriminator(Y_FAKE_IN, activation='swish', norm='instance', b_train=b_train,
+    _, Y_FAKE_IN_logit = discriminator(Y_FAKE_IN, activation='relu', norm='instance', b_train=b_train,
                                        scope=DY_scope, use_patch=True)
     #augmented_Y_IN = tf.add(Y_IN, tf.random_uniform(shape=Y_IN.get_shape(), minval=0.0, maxval=1/128))
-    _, real_Y_logit = discriminator(Y_IN, activation='swish', norm='instance', b_train=b_train,
+    _, real_Y_logit = discriminator(Y_IN, activation='relu', norm='instance', b_train=b_train,
                                     scope=DY_scope, use_patch=True)
-    _, fake_Y_logit = discriminator(fake_Y, activation='swish', norm='instance', b_train=b_train,
+    _, fake_Y_logit = discriminator(fake_Y, activation='relu', norm='instance', b_train=b_train,
                                     scope=DY_scope, use_patch=True)
 
     reconstruction_loss_Y = get_residual_loss(Y_IN, fake_Y, type='l1')
@@ -372,10 +400,18 @@ def train(model_path):
     disc_Y_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=DY_scope)
     disc_vars = disc_Y_vars
 
+    disc_l2_regularizer = tf.add_n([tf.nn.l2_loss(v) for v in disc_vars if 'bias' not in v.name])
+    total_disc_loss = total_disc_loss + 0.001 * disc_l2_regularizer
+
     trans_X2Y_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=G_scope)
     trans_vars = trans_X2Y_vars
+    trans_l2_regularizer = tf.add_n([tf.nn.l2_loss(v) for v in trans_vars if 'bias' not in v.name])
+    total_trans_loss = total_trans_loss + 0.001 * trans_l2_regularizer
 
+    #with tf.device('/device:GPU:0'):
     disc_optimizer = tf.train.AdamOptimizer(learning_rate=LR).minimize(total_disc_loss, var_list=disc_vars)
+
+    #with tf.device('/device:GPU:1'):
     trans_optimizer = tf.train.AdamOptimizer(learning_rate=LR).minimize(total_trans_loss, var_list=trans_vars)
 
     # Launch the graph in a session
@@ -418,7 +454,7 @@ def train(model_path):
                 imgs_Y = load_images(trY[start:end], base_dir=trY_dir, use_augmentation=False, add_eps=False, rotate=rot)
 
                 if imgs_Y is None:
-                    continue
+                    continue 
 
                 if len(imgs_Y[0].shape) != 3:
                     imgs_Y = np.expand_dims(imgs_Y, axis=-1)
@@ -431,7 +467,7 @@ def train(model_path):
                 imgs_X = load_images(trX, base_dir=trX_dir, use_augmentation=True, rotate=rot)
 
                 if imgs_X is None:
-                    continue
+                    continue 
 
                 if len(imgs_X[0].shape) != 3:
                     imgs_X = np.expand_dims(imgs_X, axis=-1)
@@ -452,7 +488,7 @@ def train(model_path):
                     imgs_Y = load_images(trY[start:end], base_dir=trY_dir, use_augmentation=False, add_eps=False, rotate=rot)
 
                     if imgs_Y is None:
-                        continue
+                        continue 
 
                     if len(imgs_Y[0].shape) != 3:
                         imgs_Y = np.expand_dims(imgs_Y, axis=-1)
@@ -600,7 +636,7 @@ if __name__ == '__main__':
     dense_block_depth = 64
 
     # Bottle neck(depth narrow down) depth. See Residual Dense Block and Residual Block.
-    batch_size = 2
+    batch_size = 4
     representation_dim = 128
 
     img_width = 256
