@@ -439,7 +439,7 @@ def train(model_path):
 
         num_critic = 1
 
-        image_pool = util.ImagePool(maxsize=30)
+        image_pool = util.ImagePool(maxsize=30, threshold=0.5)
         learning_rate = 2e-4
         lr_decay_step = 30
 

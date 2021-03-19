@@ -157,10 +157,11 @@ def patch_compare(img1, img2, patch_size=[4, 4]):
 
 
 class ImagePool(object):
-    def __init__(self, maxsize=50):
+    def __init__(self, maxsize=50, threshold=0.5):
         self.maxsize = maxsize
         self.num_img = 0
         self.images = []
+        self.threshold = threshold
 
     def __call__(self, image):
         if self.maxsize <= 0:
@@ -170,11 +171,10 @@ class ImagePool(object):
             self.num_img += 1
             return image
 
-        idx = int(np.random.rand() * self.maxsize)
-        tmp = copy.copy(self.images[idx])
-        self.images[idx] = image
-
-        if np.random.rand() > 0.1:
+        if np.random.rand() > self.threshold:
+            idx = int(np.random.rand() * self.maxsize)
+            tmp = copy.copy(self.images[idx])
+            self.images[idx] = image
             return tmp
         else:
             return image
