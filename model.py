@@ -13,9 +13,10 @@ import util
 import layers
 import argparse
 import time
+import post_proc
 
 
-def load_images(file_name_list, base_dir, use_augmentation=False, add_eps=False, rotate=-1, resize=[256, 256]):
+def load_images(file_name_list, base_dir, use_augmentation=False, add_eps=False, rotate=-1, resize=[240, 240]):
     try:
         images = []
 
@@ -32,7 +33,7 @@ def load_images(file_name_list, base_dir, use_augmentation=False, add_eps=False,
 
             img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             #img = cv2.resize(img, dsize=(input_width, input_height), interpolation=cv2.INTER_CUBIC)
-            img = cv2.resize(img, dsize=(resize[0], resize[1]), interpolation=cv2.INTER_CUBIC)
+            img = cv2.resize(img, dsize=(resize[0], resize[1]), interpolation=cv2.INTER_LINEAR)
 
             if img is not None:
                 img = np.array(img)
@@ -45,7 +46,7 @@ def load_images(file_name_list, base_dir, use_augmentation=False, add_eps=False,
                 if use_augmentation is True:
                     if np.random.randint(low=0, high=10) < 5:
                         # square cut out
-                        co_w = input_width // 10
+                        co_w = input_width // 16
                         co_h = co_w
                         padd_w = co_w // 2
                         padd_h = padd_w
@@ -66,7 +67,7 @@ def load_images(file_name_list, base_dir, use_augmentation=False, add_eps=False,
     return np.array(images)
 
 
-def discriminator(x, activation='relu', scope='discriminator_network', norm='layer', b_train=False, use_patch=False):
+def discriminator(x1, x2, activation='relu', scope='discriminator_network', norm='layer', b_train=False, use_patch=False):
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         if activation == 'swish':
             act_func = util.swish
@@ -78,38 +79,78 @@ def discriminator(x, activation='relu', scope='discriminator_network', norm='lay
             act_func = tf.nn.sigmoid
 
         block_depth = unit_block_depth
-        num_iter = 8
+
+        if use_patch is False:
+            block_depth = block_depth // 2
+
+        num_iter = bottleneck_num_layer
+        norm_func = norm
+
+        if use_conditional_d is True:
+            x = tf.concat([x1, x2], axis=-1)
+        else:
+            x = x1
 
         print('Discriminator Input: ' + str(x.get_shape().as_list()))
+
         l = layers.coord_conv(x, scope='coord_init', filter_dims=[1, 1, block_depth], stride_dims=[1, 1],
                         non_linear_fn=None, bias=False)
-        l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='norm_init')
+        l = layers.conv_normalize(l, norm=norm_func, b_train=b_train, scope='norm_init')
         l = act_func(l)
+
+        norm_func = norm
 
         if use_patch is True:
             print('Discriminator Patch Block : ' + str(l.get_shape().as_list()))
 
+            for i in range(4):
+                l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
+                                                 norm=norm_func, b_train=b_train, scope='patch_block_1_' + str(i))
+
             for i in range(2):
                 l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
-                                                 norm=norm, b_train=b_train, scope='patch_block_' + str(i))
+                                                 norm=norm_func, b_train=b_train, use_dilation=True, scope='patch_block_2_' + str(i))
 
             last_layer = l
             feature = layers.global_avg_pool(last_layer, output_length=representation_dim // 8, use_bias=False,
                                              scope='gp')
+
             print('Discriminator GP Dims: ' + str(feature.get_shape().as_list()))
 
-            l = layers.conv(l, scope='patch_dn_sample', filter_dims=[3, 3, block_depth], stride_dims=[2, 2],
+            l = layers.conv(l, scope='patch_dn_sample', filter_dims=[4, 4, block_depth // 4], stride_dims=[4, 4],
                             non_linear_fn=None)
-            l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='patch_norm')
+            l = layers.conv_normalize(l, norm=norm_func, b_train=b_train, scope='patch_norm')
             last_layer = act_func(l)
 
             logit = layers.conv(last_layer, scope='conv_pred', filter_dims=[1, 1, 1], stride_dims=[1, 1],
                                 non_linear_fn=None, bias=False)
             print('Discriminator Logit Dims: ' + str(logit.get_shape().as_list()))
         else:
-            for i in range(num_iter):
+            for i in range(num_iter//3):
                 l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
-                                              norm=norm, b_train=b_train, scope='at_block_' + str(i))
+                                              norm=norm_func, b_train=b_train, scope='disc_block_1_' + str(i))
+
+            print('Discriminator Block : ' + str(l.get_shape().as_list()))
+
+            l = layers.conv(l, scope='disc_dn_sample1', filter_dims=[3, 3, block_depth * 2], stride_dims=[2, 2],
+                            non_linear_fn=None)
+            l = layers.conv_normalize(l, norm=norm_func, b_train=b_train, scope='disc_norm_1')
+
+            for i in range(num_iter//3):
+                l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth * 2], num_layers=2, act_func=act_func,
+                                              norm=norm_func, b_train=b_train, scope='disc_block_2_' + str(i))
+
+            print('Discriminator Block : ' + str(l.get_shape().as_list()))
+
+            l = layers.conv(l, scope='disc_dn_sample2', filter_dims=[3, 3, block_depth * 4], stride_dims=[2, 2],
+                            non_linear_fn=None)
+            l = layers.conv_normalize(l, norm=norm_func, b_train=b_train, scope='disc_norm_2')
+
+            for i in range(num_iter//3):
+                l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth * 4], num_layers=2, act_func=act_func,
+                                              norm=norm_func, b_train=b_train, scope='disc_block_3_' + str(i))
+
+            print('Discriminator Block : ' + str(l.get_shape().as_list()))
 
             last_layer = l
             feature = layers.global_avg_pool(last_layer, output_length=representation_dim // 8, use_bias=False,
@@ -131,8 +172,8 @@ def get_feature_matching_loss(value, target, type='l1', gamma=1.0):
     elif type == 'l1':
         loss = tf.reduce_mean(tf.abs(tf.subtract(target, value)))
     elif type == 'l2':
-        # loss = tf.reduce_mean(tf.square(tf.subtract(target, value)))
-        loss = tf.reduce_mean(tf.sqrt(tf.reduce_sum(tf.square(tf.subtract(target, value)))))
+        loss = tf.reduce_mean(tf.square(tf.subtract(target, value)))
+
     return gamma * loss
 
 
@@ -193,8 +234,8 @@ def get_gradient_loss(img1, img2):
     dx_a, dy_a = tf.image.image_gradients(image_a)
     dx_b, dy_b = tf.image.image_gradients(image_b)
 
-    v_a = tf.reduce_mean(tf.image.total_variation(image_a))
-    v_b = tf.reduce_mean(tf.image.total_variation(image_b))
+    #v_a = tf.reduce_mean(tf.image.total_variation(image_a))
+    #v_b = tf.reduce_mean(tf.image.total_variation(image_b))
 
     # loss = tf.abs(tf.subtract(v_a, v_b))
     loss = tf.reduce_mean(tf.abs(tf.subtract(dx_a, dx_b))) + tf.reduce_mean(tf.abs(tf.subtract(dy_a, dy_b)))
@@ -321,7 +362,9 @@ def train(model_path):
         X_IN = tf.placeholder(tf.float32, [batch_size, input_height, input_width, num_channel])
         Y_IN = tf.placeholder(tf.float32, [batch_size, input_height, input_width, num_channel])
 
-        Y_FAKE_IN = tf.placeholder(tf.float32, [batch_size, input_height, input_width, num_channel])
+        X_POOL = tf.placeholder(tf.float32, [batch_size, input_height, input_width, num_channel])
+        Y_POOL = tf.placeholder(tf.float32, [batch_size, input_height, input_width, num_channel])
+
         LR = tf.placeholder(tf.float32, None)
         b_train = tf.placeholder(tf.bool)
 
@@ -334,27 +377,34 @@ def train(model_path):
     if use_identity_loss is True:
         id_Y = translator(Y_IN, activation='swish', norm='instance', b_train=b_train, scope=G_scope)
 
-    _, Y_FAKE_IN_logit = discriminator(Y_FAKE_IN, activation='relu', norm='instance', b_train=b_train,
-                                       scope=DY_scope, use_patch=True)
-    _, real_Y_logit = discriminator(Y_IN, activation='relu', norm='instance', b_train=b_train,
-                                    scope=DY_scope, use_patch=True)
-    _, fake_Y_logit = discriminator(fake_Y, activation='relu', norm='instance', b_train=b_train,
-                                    scope=DY_scope, use_patch=True)
+    pool_Y_feature, pool_Y_logit = discriminator(Y_POOL, X_POOL, activation='relu', norm='instance', b_train=b_train,
+                                       scope=DY_scope, use_patch=use_patch_discriminator)
+    real_Y_feature, real_Y_logit = discriminator(Y_IN, X_IN, activation='relu', norm='instance', b_train=b_train,
+                                    scope=DY_scope, use_patch=use_patch_discriminator)
+    fake_Y_feature, fake_Y_logit = discriminator(fake_Y, X_IN, activation='relu', norm='instance', b_train=b_train,
+                                    scope=DY_scope, use_patch=use_patch_discriminator)
 
     reconstruction_loss_Y = get_residual_loss(Y_IN, fake_Y, type='l1')
-    alpha = 50.0
     cyclic_loss = alpha * reconstruction_loss_Y
 
+    if use_gradient_loss is True:
+        gradient_loss = get_gradient_loss(Y_IN, fake_Y)
+
     # LS GAN
-    trans_loss_X2Y = tf.reduce_mean((fake_Y_logit - tf.ones_like(fake_Y_logit)) ** 2)
+    trans_loss_X2Y = get_feature_matching_loss(real_Y_feature, fake_Y_feature, 'l2') + \
+                     get_residual_loss(fake_Y_logit, tf.ones_like(fake_Y_logit), 'l2')
+
     disc_loss_Y = get_discriminator_loss(real_Y_logit, tf.ones_like(real_Y_logit), type='ls') + \
-                  get_discriminator_loss(Y_FAKE_IN_logit, tf.zeros_like(Y_FAKE_IN_logit), type='ls')
+                  get_discriminator_loss(pool_Y_logit, tf.zeros_like(pool_Y_logit), type='ls')
 
     if use_identity_loss is True:
         identity_loss_Y = alpha * (get_residual_loss(Y_IN, id_Y, type='l1'))
         total_trans_loss = trans_loss_X2Y + cyclic_loss + identity_loss_Y
     else:
         total_trans_loss = trans_loss_X2Y + cyclic_loss
+
+    if use_gradient_loss is True:
+        total_trans_loss = total_trans_loss + gradient_loss
 
     total_disc_loss = disc_loss_Y
 
@@ -395,7 +445,7 @@ def train(model_path):
         if file_batch_size == 0:
             file_batch_size = 1
 
-        num_critic = 1
+        num_critic = 2
 
         # Discriminator draw inputs from image pool with threshold probability
         image_pool = util.ImagePool(maxsize=30, threshold=0.5)
@@ -413,7 +463,10 @@ def train(model_path):
                                      rotate=rot, resize=[input_width, input_height])
 
                 if imgs_Y is None:
-                    continue 
+                    continue
+
+                avg_bright = np.average(imgs_Y)
+                imgs_Y = np.where(imgs_Y >= avg_bright, 1.0, -1.0)
 
                 if len(imgs_Y[0].shape) != 3:
                     imgs_Y = np.expand_dims(imgs_Y, axis=-1)
@@ -427,13 +480,15 @@ def train(model_path):
                                      rotate=rot, resize=[input_width, input_height])
 
                 if imgs_X is None:
-                    continue 
+                    continue
 
                 if len(imgs_X[0].shape) != 3:
                     imgs_X = np.expand_dims(imgs_X, axis=-1)
 
                 trans_X2Y = sess.run([fake_Y], feed_dict={X_IN: imgs_X, b_train: True})
-                pool_X2Y = image_pool(trans_X2Y[0])
+
+                trans_X2Y[0] = np.where(trans_X2Y[0] > 0.9, 1.0, -1.0)
+                pool_X2Y = image_pool([trans_X2Y[0], imgs_X])
 
                 cur_steps = (e * total_input_size) + itr + 1
                 total_steps = (total_input_size * num_epoch)
@@ -442,18 +497,10 @@ def train(model_path):
                 learning_rate = learning_rate * np.cos((np.pi * 7 / 16) * (cur_steps / total_steps))
 
                 _, d_loss = sess.run([disc_optimizer, total_disc_loss],
-                                     feed_dict={Y_IN: imgs_Y,
-                                                Y_FAKE_IN: pool_X2Y, b_train: True, LR: learning_rate})
+                                     feed_dict={Y_IN: imgs_Y, X_IN: imgs_X,
+                                                Y_POOL: pool_X2Y[0], X_POOL: pool_X2Y[1], b_train: True, LR: learning_rate})
 
                 if itr % num_critic == 0:
-                    imgs_Y = load_images(trY[start:end], base_dir=trY_dir, use_augmentation=False, add_eps=False, rotate=rot)
-
-                    if imgs_Y is None:
-                        continue 
-
-                    if len(imgs_Y[0].shape) != 3:
-                        imgs_Y = np.expand_dims(imgs_Y, axis=-1)
-
                     if use_identity_loss is True:
                         _, t_loss, x2y_loss = sess.run([trans_optimizer, total_trans_loss, trans_loss_X2Y],
                                              feed_dict={Y_IN: imgs_Y, X_IN: imgs_X,
@@ -468,28 +515,40 @@ def train(model_path):
                           ', ' + util.COLORS.WARNING + 't_loss: ' + str(t_loss) + util.COLORS.ENDC + ', ' +
                           util.COLORS.OKBLUE + 'g_loss: ' + str(x2y_loss) + util.COLORS.ENDC)
 
-                    decoded_images_X2Y = np.squeeze(trans_X2Y)
-                    final_images = (decoded_images_X2Y * 128.0) + 128.0
-                    cv2.imwrite(out_dir + '/' + trX[0], final_images[0])
+                    decoded_images_X2Y = trans_X2Y[0]
+                    final_image = (decoded_images_X2Y[0] * 128.0) + 128.0
+                    cv2.imwrite(out_dir + '/' + trX[0], final_image)
+
+                    # Test
+                    '''
+                    image_path = out_dir + '/' + trX[0]
+                    configs = dict()
+                    configs['MAX_DISTANCE'] = 4
+                    configs['MAX_ITERATION'] = 2
+                    contours = post_proc.refine_image(image_path, configs)
+                    result_image_contours = np.asarray(contours)
+
+                    # Get result image
+                    mask_result_img = cv2.imread(image_path)
+                    mask_result_img = np.zeros(mask_result_img.shape)
+                    cv2.drawContours(mask_result_img, result_image_contours, -1, (255, 255, 255), -1)
+
+                    # Save result image
+                    cv2.imwrite(image_path, mask_result_img)
+                    '''
 
                 itr += 1
 
                 if itr % 10 == 0:
-                    print('Elapsed Time at ' + str(cur_steps) + '/' + str(total_steps) + ' steps, ' + str(time.time() - train_start_time) + ' sec')
+                    print('Elapsed Time at  ' + str(cur_steps) + '/' + str(total_steps) + ' steps, ' + str(time.time() - train_start_time) + ' sec')
 
-                if itr % 200 == 0:
+                if itr % 100 == 0:
                     try:
                         print(util.COLORS.WARNING + 'Saving model...' + util.COLORS.ENDC)
                         saver.save(sess, model_path)
                         print(util.COLORS.OKGREEN + 'Saved.' + util.COLORS.ENDC)
                     except:
                         print(util.COLORS.FAIL + 'Save failed' + util.COLORS.ENDC)
-            try:
-                print(util.COLORS.WARNING + 'Saving model...' + util.COLORS.ENDC)
-                saver.save(sess, model_path)
-                print(util.COLORS.OKGREEN + 'Saved.' + util.COLORS.ENDC)
-            except:
-                print(util.COLORS.FAIL + 'Save failed' + util.COLORS.ENDC)
 
         print('Training Time: ' + str(time.time() - train_start_time))
 
@@ -515,8 +574,8 @@ def test(model_path):
 
     trans_vars = trans_X2Y_vars + disc_Y_vars
 
-    _, d_logit = discriminator(fake_Y, activation='swish', norm='instance', b_train=b_train,
-                                    scope=DY_scope, use_patch=True)
+    _, d_logit = discriminator(fake_Y, activation='relu', norm='instance', b_train=b_train,
+                                    scope=DY_scope, use_patch=use_patch_discriminator)
 
     # Launch the graph in a session
     with tf.Session(config=config) as sess:
@@ -536,12 +595,14 @@ def test(model_path):
         file_name_list = []
 
         for f_name in trX:
-            imgs_X = load_images([f_name], base_dir=trX_dir, use_augmentation=False)
+            imgs_X = load_images([f_name], base_dir=trX_dir, use_augmentation=False, resize=[input_width, input_height])
             if len(imgs_X[0].shape) != 3:
                 imgs_X = np.expand_dims(imgs_X, axis=3)
 
             trans_X2Y, logit = sess.run([fake_Y, d_logit], feed_dict={X_IN: imgs_X, b_train: False})
             decoded_images_X2Y = np.squeeze(trans_X2Y)
+            avg_bright = np.average(decoded_images_X2Y)
+            decoded_images_X2Y = np.where(decoded_images_X2Y > avg_bright, 1.0, -1.0)
             decoded_images_X2Y = (decoded_images_X2Y * 128.0) + 128.0
             #decoded_images_X2Y = cv2.cvtColor(decoded_images_X2Y, cv2.COLOR_BGR2GRAY)
             cv2.imwrite(out_dir + '/' + f_name, decoded_images_X2Y)
@@ -582,6 +643,9 @@ if __name__ == '__main__':
     parser.add_argument('--test_data', type=str, help='test data directory', default='test')
     parser.add_argument('--out', type=str, help='output directory', default='imgs')
     parser.add_argument('--intensity', type=int, help='intensity', default=63)
+    parser.add_argument('--alpha', type=int, help='reconstruction weight', default=50)
+    parser.add_argument('--resize', type=int, help='traing image resize to', default=256)
+    parser.add_argument('--use_patch', type=bool, help='Use patch discriminator', default=True)
 
     args = parser.parse_args()
 
@@ -589,23 +653,25 @@ if __name__ == '__main__':
     test_data = args.test_data
     model_path = args.model_path
     intensity = args.intensity
+    alpha = args.alpha
     out_dir = args.out
 
-    bottleneck_num_layer = 16  # Number of translator bottle neck layers or blocks
-    bottleneck_input_wh = 64   # Translator bottle neck layer input size
-    unit_block_depth = 128     # Unit channel depth. Most layers would use N x unit_block_depth
-
-    batch_size = 2
-    representation_dim = 128   # Discriminator last feature size.
-
-    # Input image will be resized to [256, 256, 1]
-    input_width = 256
-    input_height = 256
+    # Input image will be resized.
+    input_width = args.resize
+    input_height = args.resize
     num_channel = 1
+    bottleneck_num_layer = 32  # Number of translator bottle neck layers or blocks
+    bottleneck_input_wh = 64  # Fixed. input_width // 2  # Translator bottle neck layer input size
+    unit_block_depth = 128  # Unit channel depth. Most layers would use N x unit_block_depth
 
+    batch_size = 1
+    representation_dim = 128  # Discriminator last feature size.
     test_size = 100
     num_epoch = 300
     use_identity_loss = True
+    use_gradient_loss = True
+    use_conditional_d = True
+    use_patch_discriminator = args.use_patch
     weight_decay = 1e-4
 
     if args.mode == 'train':
