@@ -29,11 +29,15 @@ def load_images(file_name_list, base_dir, use_augmentation=False, add_eps=False,
                 print('Load failed: ' + fullname)
                 return None
 
+            h, w, c = img.shape
+
             if rotate > -1:
                 img = cv2.rotate(img, rotate)
 
             img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            img = cv2.resize(img, dsize=(resize[0], resize[1]), interpolation=cv2.INTER_AREA)
+
+            if h != resize[0]:
+                img = cv2.resize(img, dsize=(resize[0], resize[1]), interpolation=cv2.INTER_AREA)
 
             if img is not None:
                 img = np.array(img)
@@ -82,9 +86,6 @@ def hr_discriminator(x1, x2, activation='relu', scope='hr_discriminator_network'
 
         block_depth = unit_block_depth
 
-        if use_patch is False:
-            block_depth = block_depth // 2
-
         num_iter = bottleneck_num_layer
         norm_func = norm
 
@@ -95,7 +96,7 @@ def hr_discriminator(x1, x2, activation='relu', scope='hr_discriminator_network'
 
         print('HR Discriminator ' + scope + ' Input: ' + str(x.get_shape().as_list()))
 
-        l = layers.coord_conv(x, scope='coord_init', filter_dims=[1, 1, block_depth], stride_dims=[1, 1],
+        l = layers.conv(x, scope='init', filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
                         non_linear_fn=None, bias=False)
         l = layers.conv_normalize(l, norm=norm_func, b_train=b_train, scope='norm_init')
         l = act_func(l)
@@ -170,10 +171,7 @@ def lr_discriminator(x1, x2, activation='relu', scope='lr_discriminator_network'
         else:
             act_func = tf.nn.sigmoid
 
-        block_depth = unit_block_depth
-
-        if use_patch is False:
-            block_depth = block_depth // 2
+        block_depth = unit_block_depth * 8
 
         num_iter = bottleneck_num_layer
         norm_func = norm
@@ -185,7 +183,7 @@ def lr_discriminator(x1, x2, activation='relu', scope='lr_discriminator_network'
 
         print('LR Discriminator ' + scope + ' Input: ' + str(x.get_shape().as_list()))
 
-        l = layers.coord_conv(x, scope='coord_init', filter_dims=[1, 1, block_depth], stride_dims=[1, 1],
+        l = layers.conv(x, scope='init', filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
                         non_linear_fn=None, bias=False)
         l = layers.conv_normalize(l, norm=norm_func, b_train=b_train, scope='norm_init')
         l = act_func(l)
@@ -361,8 +359,7 @@ def hr_translator(x, lr_feature, activation='relu', scope='hr_translator', norm=
             print('HR Translator ' + scope + ' Input: ' + str(x.get_shape().as_list()))
 
             # Init Stage. Coordinated convolution: Embed explicit positional information
-            block_depth = block_depth // 4
-            l = layers.coord_conv(x, scope='coord_init', filter_dims=[1, 1, block_depth], stride_dims=[1, 1],
+            l = layers.conv(x, scope='init', filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
                                   non_linear_fn=None, bias=False)
             l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='norm_init')
             l = act_func(l)
@@ -371,13 +368,15 @@ def hr_translator(x, lr_feature, activation='relu', scope='hr_translator', norm=
 
             # Downsample stage.
             for i in range(downsample_num_itr):
-                if use_unet is True:
-                    shorcut_layers.append(l)
                 block_depth = block_depth * 2
                 l = layers.conv(l, scope='tr_' + str(i), filter_dims=[3, 3, block_depth], stride_dims=[2, 2],
                                 non_linear_fn=None)
                 l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='norm_' + str(i))
                 l = act_func(l)
+
+                if use_unet_hr is True:
+                    shorcut_layers.append(l)
+
                 print('HR Downsample Block ' + str(i) + ': ' + str(l.get_shape().as_list()))
 
             # Bottleneck stage
@@ -392,6 +391,8 @@ def hr_translator(x, lr_feature, activation='relu', scope='hr_translator', norm=
             # Upsample stage
             for i in range(upsample_num_itr):
                 if upsample == 'espcn':
+                    if use_unet_hr is True:
+                        l = tf.concat([l, shorcut_layers[upsample_num_itr-1-i]], axis=-1)
                     # ESPCN upsample
                     block_depth = block_depth // 2
                     l = layers.conv(l, scope='espcn_' + str(i), filter_dims=[3, 3, block_depth * 2 * 2],
@@ -399,9 +400,6 @@ def hr_translator(x, lr_feature, activation='relu', scope='hr_translator', norm=
                     l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='espcn_norm_' + str(i))
                     l = act_func(l)
                     l = tf.nn.depth_to_space(l, 2)
-
-                    if use_unet is True:
-                        l = tf.concat([l, shorcut_layers[upsample_num_itr-1-i]], axis=-1)
 
                     print('HR_Upsampling ' + str(i) + ': ' + str(l.get_shape().as_list()))
                 elif upsample == 'resize':
@@ -432,18 +430,16 @@ def hr_translator(x, lr_feature, activation='relu', scope='hr_translator', norm=
                     l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='deconv_norm_' + str(i))
                     l = act_func(l)
 
-            # Refinement
-            block_depth = block_depth // 2
-            for i in range(refine_num_itr):
-                l = layers.conv(l, scope='refine_' + str(i), filter_dims=[3, 3, block_depth],
-                                stride_dims=[1, 1], non_linear_fn=None)
-                l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='refine_norm_' + str(i))
-                l = act_func(l)
+            if use_refinement is True:
+                # Refinement
+                block_depth = block_depth // 2
+                for i in range(refine_num_itr):
+                    l = layers.conv(l, scope='refine_' + str(i), filter_dims=[3, 3, block_depth],
+                                    stride_dims=[1, 1], non_linear_fn=None)
+                    l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='refine_norm_' + str(i))
+                    l = act_func(l)
 
-                #l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, use_dilation=True,
-                #                              act_func=act_func, norm=norm, b_train=b_train,
-                #                              scope='refine_' + str(i))
-                print('HR Refinement ' + str(i) + ': ' + str(l.get_shape().as_list()))
+                    print('HR Refinement ' + str(i) + ': ' + str(l.get_shape().as_list()))
 
             # Transform to input channels
             l = layers.conv(l, scope='last', filter_dims=[3, 3, num_channel], stride_dims=[1, 1],
@@ -475,7 +471,6 @@ def lr_translator(x, activation='relu', scope='lr_translator', norm='layer', ups
             else:
                 act_func = tf.nn.sigmoid
 
-            block_depth = unit_block_depth  # Number of channel at start
             bottleneck_num_itr = bottleneck_num_layer  # Num of bottleneck blocks of layers
 
             downsample_num_itr = bottleneck_num_resize # Num of downsampling
@@ -486,9 +481,9 @@ def lr_translator(x, activation='relu', scope='lr_translator', norm='layer', ups
             print('LR Translator ' + scope + ' Input: ' + str(x.get_shape().as_list()))
 
             # Init Stage. Coordinated convolution: Embed explicit positional information
-            block_depth = block_depth // 4
-            l = layers.coord_conv(x, scope='coord_init', filter_dims=[1, 1, block_depth], stride_dims=[1, 1],
-                                  non_linear_fn=None, bias=False)
+            block_depth = unit_block_depth * 2
+            l = layers.conv(x, scope='init', filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
+                            non_linear_fn=None, bias=False)
             l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='norm_init')
             l = act_func(l)
 
@@ -555,16 +550,15 @@ def lr_translator(x, activation='relu', scope='lr_translator', norm='layer', ups
                     l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='deconv_norm_' + str(i))
                     l = act_func(l)
 
-            # Refinement
-            for i in range(refine_num_itr):
-                l = layers.conv(l, scope='refine_' + str(i), filter_dims=[3, 3, block_depth],
-                                stride_dims=[1, 1], non_linear_fn=None)
-                l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='refine_norm_' + str(i))
-                l = act_func(l)
-                #l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, use_dilation=True,
-                #                              act_func=act_func, norm=norm, b_train=b_train,
-                #                              scope='refine_' + str(i))
-                print('LR Refinement ' + str(i) + ': ' + str(l.get_shape().as_list()))
+            if use_refinement is True:
+                # Refinement
+                for i in range(refine_num_itr):
+                    l = layers.conv(l, scope='refine_' + str(i), filter_dims=[3, 3, block_depth],
+                                    stride_dims=[1, 1], non_linear_fn=None)
+                    l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='refine_norm_' + str(i))
+                    l = act_func(l)
+
+                    print('LR Refinement ' + str(i) + ': ' + str(l.get_shape().as_list()))
 
             lr_feature = l
 
@@ -987,6 +981,7 @@ if __name__ == '__main__':
     parser.add_argument('--smoothness', type=int, help='max line segment length to flatten', default=8)
     parser.add_argument('--iteration', type=int, help='num iterations of flattening', default=2)
     parser.add_argument('--epoch', type=int, help='num epoch', default=100)
+    parser.add_argument('--lr_ratio', type=int, help='low resolution ratio', default=8)
 
     args = parser.parse_args()
 
@@ -1003,6 +998,8 @@ if __name__ == '__main__':
     use_attention = args.use_attention
 
     use_unet = True
+    use_unet_hr = True
+    use_refinement = True
     # Input image will be resized.
     input_width = args.resize
     input_height = args.resize
@@ -1010,9 +1007,9 @@ if __name__ == '__main__':
     bottleneck_num_layer = 8  # Number of translator bottle neck layers or blocks
     bottleneck_input_wh = input_width // 4  # Translator bottle neck layer input size
     bottleneck_num_resize = 2  # Num of Downsampling, Upsampling
-    unit_block_depth = 128  # Unit channel depth. Most layers would use N x unit_block_depth
+    unit_block_depth = 16  # Unit channel depth. Most layers would use N x unit_block_depth
 
-    lr_ratio = 4
+    lr_ratio = args.lr_ratio
     lr_input_width = input_width // lr_ratio
     lr_input_height = input_height // lr_ratio
 
