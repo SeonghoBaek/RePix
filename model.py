@@ -85,8 +85,6 @@ def hr_discriminator(x1, x2, activation='relu', scope='hr_discriminator_network'
             act_func = tf.nn.sigmoid
 
         block_depth = unit_block_depth
-
-        num_iter = bottleneck_num_layer
         norm_func = norm
 
         if use_conditional_d is True:
@@ -106,7 +104,7 @@ def hr_discriminator(x1, x2, activation='relu', scope='hr_discriminator_network'
         if use_patch is True:
             print('HR Discriminator Patch Block : ' + str(l.get_shape().as_list()))
 
-            for i in range(4):
+            for i in range(hr_patch_discriminator_depth):
                 l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
                                                  norm=norm_func, b_train=b_train, scope='patch_block_1_' + str(i))
 
@@ -123,6 +121,7 @@ def hr_discriminator(x1, x2, activation='relu', scope='hr_discriminator_network'
                                 non_linear_fn=None, bias=False)
             print('HR Discriminator Logit Dims: ' + str(logit.get_shape().as_list()))
         else:
+            num_iter = hr_discriminator_depth
             for i in range(num_iter//3):
                 l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
                                               norm=norm_func, b_train=b_train, scope='disc_block_1_' + str(i))
@@ -173,7 +172,6 @@ def lr_discriminator(x1, x2, activation='relu', scope='lr_discriminator_network'
 
         block_depth = unit_block_depth * 8
 
-        num_iter = bottleneck_num_layer
         norm_func = norm
 
         if use_conditional_d is True:
@@ -193,7 +191,7 @@ def lr_discriminator(x1, x2, activation='relu', scope='lr_discriminator_network'
         if use_patch is True:
             print('LR Discriminator Patch Block : ' + str(l.get_shape().as_list()))
 
-            for i in range(4):
+            for i in range(lr_patch_discriminator_depth):
                 l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
                                                  norm=norm_func, b_train=b_train, scope='patch_block_1_' + str(i))
 
@@ -210,6 +208,8 @@ def lr_discriminator(x1, x2, activation='relu', scope='lr_discriminator_network'
                                 non_linear_fn=None, bias=False)
             print('LR Discriminator Logit Dims: ' + str(logit.get_shape().as_list()))
         else:
+            num_iter = lr_discriminator_depth
+
             for i in range(num_iter//3):
                 l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
                                               norm=norm_func, b_train=b_train, scope='disc_block_1_' + str(i))
@@ -349,12 +349,12 @@ def hr_translator(x, lr_feature, activation='relu', scope='hr_translator', norm=
                 act_func = tf.nn.sigmoid
 
             block_depth = unit_block_depth  # Number of channel at start
-            bottleneck_num_itr = 2  # Num of bottleneck blocks of layers
+            bottleneck_num_itr = hr_bottleneck_depth  # Num of bottleneck blocks of layers
 
             downsample_num_itr = int(np.log2(lr_ratio))  # Num of downsampling
             upsample_num_itr = downsample_num_itr  # Num of upsampling
 
-            refine_num_itr = 2
+            refine_num_itr = hr_refinement_depth
 
             print('HR Translator ' + scope + ' Input: ' + str(x.get_shape().as_list()))
 
@@ -379,14 +379,20 @@ def hr_translator(x, lr_feature, activation='relu', scope='hr_translator', norm=
 
                 print('HR Downsample Block ' + str(i) + ': ' + str(l.get_shape().as_list()))
 
+            l = tf.concat([l, lr_feature], axis=-1)
+            l = layers.conv(l, scope='concat', filter_dims=[3, 3, block_depth],
+                            stride_dims=[1, 1], non_linear_fn=None)
+            l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='concat_norm_' + str(i))
+            l = act_func(l)
+
+            print('HR_Concat layer: ' + str(l.get_shape().as_list()))
+
             # Bottleneck stage
             for i in range(bottleneck_num_itr):
                 print('HR Bottleneck Block : ' + str(l.get_shape().as_list()))
                 l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
-                                                 norm=norm, b_train=b_train, use_dilation=False, scope='bt_block_' + str(i))
-
-            l = tf.concat([l, lr_feature], axis=-1)
-            print('HR_Concat layer: ' + str(l.get_shape().as_list()))
+                                                 norm=norm, b_train=b_train, use_dilation=False,
+                                                 scope='bt_block_' + str(i))
 
             # Upsample stage
             for i in range(upsample_num_itr):
@@ -471,12 +477,11 @@ def lr_translator(x, activation='relu', scope='lr_translator', norm='layer', ups
             else:
                 act_func = tf.nn.sigmoid
 
-            bottleneck_num_itr = bottleneck_num_layer  # Num of bottleneck blocks of layers
+            bottleneck_num_itr = lr_bottleneck_depth  # Num of bottleneck blocks of layers
+            downsample_num_itr = lr_bottleneck_num_resize # Num of downsampling
+            upsample_num_itr = lr_bottleneck_num_resize # Num of upsampling
 
-            downsample_num_itr = bottleneck_num_resize # Num of downsampling
-            upsample_num_itr = bottleneck_num_resize # Num of upsampling
-
-            refine_num_itr = 1
+            refine_num_itr = lr_refinement_depth
 
             print('LR Translator ' + scope + ' Input: ' + str(x.get_shape().as_list()))
 
@@ -560,13 +565,13 @@ def lr_translator(x, activation='relu', scope='lr_translator', norm='layer', ups
 
                     print('LR Refinement ' + str(i) + ': ' + str(l.get_shape().as_list()))
 
-            lr_feature = l
-
             if use_attention is True:
                 block_depth = block_depth // 4
-                l = layers.coord_conv(l, scope='squeeze', filter_dims=[1, 1, block_depth], stride_dims=[1, 1],
+                l = layers.conv(l, scope='squeeze', filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
                                       non_linear_fn=act_func, bias=False)
                 l = layers.self_attention(l, channels=block_depth, act_func=act_func)
+
+            lr_feature = l
 
             # Transform to input channels
             l = layers.conv(l, scope='last', filter_dims=[3, 3, num_channel], stride_dims=[1, 1],
@@ -633,7 +638,7 @@ def train(model_path):
 
     # High Resolution Loss
     reconstruction_loss_hr_Y = get_residual_loss(HR_Y_IN, fake_hr_Y, type='l1')
-    cyclic_loss_hr = alpha * reconstruction_loss_hr_Y
+    cyclic_loss_hr = alpha_hr * reconstruction_loss_hr_Y
 
     if use_gradient_loss is True:
         gradient_loss_hr = get_gradient_loss(HR_Y_IN, fake_hr_Y)
@@ -646,7 +651,7 @@ def train(model_path):
                      get_discriminator_loss(pool_hr_Y_logit, tf.zeros_like(pool_hr_Y_logit), type='ls')
 
     if use_identity_loss is True:
-        identity_loss_hr_Y = alpha * (get_residual_loss(HR_Y_IN, id_hr_Y, type='l1'))
+        identity_loss_hr_Y = alpha_hr * (get_residual_loss(HR_Y_IN, id_hr_Y, type='l1'))
         total_trans_loss_hr = trans_loss_X2Y_hr + cyclic_loss_hr + identity_loss_hr_Y
     else:
         total_trans_loss_hr = trans_loss_X2Y_hr + cyclic_loss_hr
@@ -658,7 +663,7 @@ def train(model_path):
 
     # Low Resolution Loss
     reconstruction_loss_lr_Y = get_residual_loss(LR_Y_IN, fake_lr_Y, type='l1')
-    cyclic_loss_lr = alpha * reconstruction_loss_lr_Y
+    cyclic_loss_lr = alpha_lr * reconstruction_loss_lr_Y
 
     if use_gradient_loss is True:
         gradient_loss_lr = get_gradient_loss(LR_Y_IN, fake_lr_Y)
@@ -671,7 +676,7 @@ def train(model_path):
                      get_discriminator_loss(pool_lr_Y_logit, tf.zeros_like(pool_lr_Y_logit), type='ls')
 
     if use_identity_loss is True:
-        identity_loss_lr_Y = alpha * (get_residual_loss(LR_Y_IN, id_lr_Y, type='l1'))
+        identity_loss_lr_Y = alpha_lr * (get_residual_loss(LR_Y_IN, id_lr_Y, type='l1'))
         total_trans_loss_lr = trans_loss_X2Y_lr + cyclic_loss_lr + identity_loss_lr_Y
     else:
         total_trans_loss_lr = trans_loss_X2Y_lr + cyclic_loss_lr
@@ -706,7 +711,7 @@ def train(model_path):
     total_trans_loss_lr = total_trans_loss_lr + weight_decay * trans_l2_regularizer_lr
 
     disc_optimizer_hr = tf.train.AdamOptimizer(learning_rate=LR).minimize(total_disc_loss_hr, var_list=disc_vars_hr)
-    trans_optimizer_hr = tf.train.AdamOptimizer(learning_rate=LR).minimize(total_trans_loss_hr, var_list=trans_vars_hr + trans_vars_lr)
+    trans_optimizer_hr = tf.train.AdamOptimizer(learning_rate=LR).minimize(total_trans_loss_hr, var_list=trans_vars_hr+trans_vars_lr)
     disc_optimizer_lr = tf.train.AdamOptimizer(learning_rate=LR).minimize(total_disc_loss_lr, var_list=disc_vars_lr)
     trans_optimizer_lr = tf.train.AdamOptimizer(learning_rate=LR).minimize(total_trans_loss_lr, var_list=trans_vars_lr)
 
@@ -828,23 +833,24 @@ def train(model_path):
                     _, t_loss_lr, x2y_loss_lr = sess.run([trans_optimizer_lr, total_trans_loss_lr, trans_loss_X2Y_lr],
                                                          feed_dict={LR_Y_IN: imgs_Y_lr, LR_X_IN: imgs_X_lr,
                                                          b_train: True, LR: learning_rate})
-                    _, t_loss_hr, x2y_loss_hr = sess.run([trans_optimizer_hr, total_trans_loss_hr, trans_loss_X2Y_hr],
-                                                         feed_dict={HR_Y_IN: imgs_Y_hr, HR_X_IN: imgs_X_hr,
-                                                                    LR_Y_IN: imgs_Y_lr, LR_X_IN: imgs_X_lr,
-                                                         b_train: True, LR: learning_rate})
-
                     print(util.COLORS.HEADER + 'epoch: ' + str(e) + util.COLORS.ENDC + ', ' +
                           util.COLORS.OKGREEN + 'd_loss_lr: ' + str(d_loss_lr) + util.COLORS.ENDC +
                           ', ' + util.COLORS.WARNING + 't_loss_lr: ' + str(t_loss_lr) + util.COLORS.ENDC + ', ' +
                           util.COLORS.OKBLUE + 'g_loss_lr: ' + str(x2y_loss_lr) + util.COLORS.ENDC)
-                    print(util.COLORS.HEADER + '     : ' + str(e) + util.COLORS.ENDC + ', ' +
-                          util.COLORS.OKGREEN + 'd_loss_hr: ' + str(d_loss_hr) + util.COLORS.ENDC +
-                          ', ' + util.COLORS.WARNING + 't_loss_hr: ' + str(t_loss_hr) + util.COLORS.ENDC + ', ' +
-                          util.COLORS.OKBLUE + 'g_loss_hr: ' + str(x2y_loss_hr) + util.COLORS.ENDC)
 
-                    decoded_images_X2Y = trans_hr[0]
-                    final_image = (decoded_images_X2Y[0] * 128.0) + 128.0
-                    cv2.imwrite(out_dir + '/' + trX[0], final_image)
+                    if e > lr_pretrain_epoch:
+                        _, t_loss_hr, x2y_loss_hr = sess.run([trans_optimizer_hr, total_trans_loss_hr, trans_loss_X2Y_hr],
+                                                             feed_dict={HR_Y_IN: imgs_Y_hr, HR_X_IN: imgs_X_hr,
+                                                             LR_Y_IN: imgs_Y_lr, LR_X_IN: imgs_X_lr,
+                                                             b_train: True, LR: learning_rate})
+                        print(util.COLORS.HEADER + '     : ' + str(e) + util.COLORS.ENDC + ', ' +
+                              util.COLORS.OKGREEN + 'd_loss_hr: ' + str(d_loss_hr) + util.COLORS.ENDC +
+                              ', ' + util.COLORS.WARNING + 't_loss_hr: ' + str(t_loss_hr) + util.COLORS.ENDC + ', ' +
+                              util.COLORS.OKBLUE + 'g_loss_hr: ' + str(x2y_loss_hr) + util.COLORS.ENDC)
+
+                        decoded_images_X2Y = trans_hr[0]
+                        final_image = (decoded_images_X2Y[0] * 128.0) + 128.0
+                        cv2.imwrite(out_dir + '/' + trX[0], final_image)
 
                 itr += 1
 
@@ -980,8 +986,10 @@ if __name__ == '__main__':
     parser.add_argument('--use_attention', help='Use attention block in translator', default=False, action='store_true')
     parser.add_argument('--smoothness', type=int, help='max line segment length to flatten', default=8)
     parser.add_argument('--iteration', type=int, help='num iterations of flattening', default=2)
-    parser.add_argument('--epoch', type=int, help='num epoch', default=100)
+    parser.add_argument('--epoch', type=int, help='num epoch', default=40)
+    parser.add_argument('--pretrain_epoch', type=int, help='num epoch', default=10)
     parser.add_argument('--lr_ratio', type=int, help='low resolution ratio', default=8)
+    parser.add_argument('--network_depth', type=int, help='low resolution translator depth', default=8)
 
     args = parser.parse_args()
 
@@ -991,27 +999,37 @@ if __name__ == '__main__':
     model_path = args.model_path
     intensity = args.intensity
     alpha = args.alpha
+    alpha_hr = alpha
+    alpha_lr = alpha_hr
+
     out_dir = args.out
     use_postprocess = args.use_postprocess
     postproc_smoothness = args.smoothness
     postproc_iteration = args.iteration
     use_attention = args.use_attention
-
     use_unet = True
     use_unet_hr = True
-    use_refinement = True
+    use_refinement = False
     # Input image will be resized.
     input_width = args.resize
     input_height = args.resize
     num_channel = 1
-    bottleneck_num_layer = 8  # Number of translator bottle neck layers or blocks
-    bottleneck_input_wh = input_width // 4  # Translator bottle neck layer input size
-    bottleneck_num_resize = 2  # Num of Downsampling, Upsampling
     unit_block_depth = 16  # Unit channel depth. Most layers would use N x unit_block_depth
 
+    hr_bottleneck_depth = 4
+    hr_refinement_depth = 1
+    hr_discriminator_depth = 12
+    hr_patch_discriminator_depth = 8
+
+    lr_pretrain_epoch = args.pretrain_epoch
+    lr_bottleneck_num_resize = 2  # Num of Downsampling, Upsampling
+    lr_bottleneck_depth = args.network_depth  # Number of translator bottle neck layers or blocks
     lr_ratio = args.lr_ratio
     lr_input_width = input_width // lr_ratio
     lr_input_height = input_height // lr_ratio
+    lr_refinement_depth = 2
+    lr_discriminator_depth = 12
+    lr_patch_discriminator_depth = 4
 
     batch_size = 1
     representation_dim = 128  # Discriminator last feature size.
