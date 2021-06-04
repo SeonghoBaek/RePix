@@ -117,7 +117,6 @@ def get_rectilinear_coord(now_coord, prev_coord):
 
     return new_coord_list[::-1]
 
-  
 def remove_unnecessary_points(contour, init_idx=0):
     '''
         Delete an mid pixel on the same line
@@ -155,7 +154,6 @@ def remove_unnecessary_points(contour, init_idx=0):
                 continue
     return del_count
 
-  
 def remove_unnecessary_points_range(contour, init_idx=0):
     '''
         Delete an mid pixel on the same line
@@ -197,7 +195,6 @@ def remove_unnecessary_points_range(contour, init_idx=0):
                 continue
     return del_count
 
-  
 def find_stair_shape(now_coord, next3_coord_list, MAX_DISTANCE):
     '''Find coordinates consisting of 's' shapes'''
     next1_coord, next2_coord, next3_coord = next3_coord_list[0], next3_coord_list[1], next3_coord_list[2]
@@ -219,7 +216,6 @@ def find_stair_shape(now_coord, next3_coord_list, MAX_DISTANCE):
     else:
         return False
 
-      
 def compute_new_coord(now_coord, next3_coord_list, stair_type):
     '''Reduce coordinates to '-' shapes'''
     next1_coord, next2_coord, next3_coord = next3_coord_list[0], next3_coord_list[1], next3_coord_list[2]
@@ -263,7 +259,6 @@ def make_rectilinear(contour):
     remove_unnecessary_points(rectilinearized_contour)
     return rectilinearized_contour
 
-  
 def flatten_stair_shape(rectilinearized_contour, MAX_DISTANCE, MAX_ITERATION):
     '''Refine Stair-case: Find coordinates consisting of 's' shapes & Reduce coordinates to '-' shape'''
     if len(rectilinearized_contour) >= 4:  # min_nums_of_points
@@ -339,6 +334,43 @@ def refine_image(pred_img_path, configs):
 
     # refinement process for each contour
     result_contours = list()
+    if len(contours) == 0:
+        return contours
+    else:
+        for idx_contour, contour in enumerate(contours):
+
+            # [Main_logic 2] make rectilinear
+            rectilinearized_contour = make_rectilinear(contour)
+
+            # [Main_logic 3] flatten stair-shape
+            result_contour = flatten_stair_shape(rectilinearized_contour, MAX_DISTANCE=configs['MAX_DISTANCE'], MAX_ITERATION=configs['MAX_ITERATION'])
+            result_contours.append(np.asarray(result_contour))
+
+        return result_contours
+
+
+def refine_mem_image(grey_img, configs):
+    '''
+        cv2.findContours() -> make_rectilinear() -> flatten_stair_shape()
+        * make rectilinear = convert diagonal to stair_shape
+    '''
+    KERNEL_SIZE = 3
+
+    # prepare & preprocess(with morphology) mask_pred_img
+    gray_pred_img = grey_img
+    _, gray_pred_img = cv2.threshold(gray_pred_img, 1, 255, cv2.THRESH_BINARY)
+    gray_pred_img = cv2.morphologyEx(gray_pred_img, cv2.MORPH_CLOSE, np.ones((KERNEL_SIZE, KERNEL_SIZE), np.uint8))
+
+    # [Main_logic 1] find contours
+    try:
+        _, contours, hierarchy = cv2.findContours(gray_pred_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    except:
+        contours, hierarchy = cv2.findContours(gray_pred_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    del gray_pred_img
+
+    # refinement process for each contour
+    result_contours = list()
+
     if len(contours) == 0:
         return contours
     else:
