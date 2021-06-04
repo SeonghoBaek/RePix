@@ -1,1 +1,3 @@
-# Pix2Pix
+# RePix
+
+Revisiting Pix2Pix
