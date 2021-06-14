@@ -1,6 +1,6 @@
 # ==============================================================================
 # Author: Seongho Baek
-# Contact: seonghobaek@.com
+# Contact: seonghobaek@gmail.com
 #
 # ==============================================================================
 
@@ -64,7 +64,7 @@ def load_images(file_name_list, base_dir, crop=None, use_augmentation=False, add
                 if use_augmentation is True:
                     # if np.random.randint(low=0, high=10) < 5:
                     # square cut out
-                    co_w = input_width // 8
+                    co_w = input_width // 32
                     co_h = co_w
                     padd_w = co_w // 2
                     padd_h = padd_w
@@ -615,15 +615,15 @@ def train(model_path):
     LR_DY_scope = 'lr_discriminator'
 
     with tf.device('/device:CPU:0'):
-        HR_X_IN = tf.placeholder(tf.float32, [batch_size, input_height, input_width, num_channel])
-        LR_X_IN = tf.placeholder(tf.float32, [batch_size, lr_input_height, lr_input_width, num_channel])
-        HR_Y_IN = tf.placeholder(tf.float32, [batch_size, input_height, input_width, num_channel])
-        LR_Y_IN = tf.placeholder(tf.float32, [batch_size, lr_input_height, lr_input_width, num_channel])
+        HR_X_IN = tf.placeholder(tf.float32, [None, input_height, input_width, num_channel])
+        LR_X_IN = tf.placeholder(tf.float32, [None, lr_input_height, lr_input_width, num_channel])
+        HR_Y_IN = tf.placeholder(tf.float32, [None, input_height, input_width, num_channel])
+        LR_Y_IN = tf.placeholder(tf.float32, [None, lr_input_height, lr_input_width, num_channel])
 
-        HR_X_POOL = tf.placeholder(tf.float32, [batch_size, input_height, input_width, num_channel])
-        LR_X_POOL = tf.placeholder(tf.float32, [batch_size, lr_input_height, lr_input_width, num_channel])
-        HR_Y_POOL = tf.placeholder(tf.float32, [batch_size, input_height, input_width, num_channel])
-        LR_Y_POOL = tf.placeholder(tf.float32, [batch_size, lr_input_height, lr_input_width, num_channel])
+        HR_X_POOL = tf.placeholder(tf.float32, [None, input_height, input_width, num_channel])
+        LR_X_POOL = tf.placeholder(tf.float32, [None, lr_input_height, lr_input_width, num_channel])
+        HR_Y_POOL = tf.placeholder(tf.float32, [None, input_height, input_width, num_channel])
+        LR_Y_POOL = tf.placeholder(tf.float32, [None, lr_input_height, lr_input_width, num_channel])
 
         LR = tf.placeholder(tf.float32, None)  # Learning Rate
         ALPHA = tf.placeholder(tf.float32, None)
@@ -669,10 +669,10 @@ def train(model_path):
         cyclic_loss_hr = cyclic_loss_hr + gradient_loss_hr
 
     # LS GAN
-    trans_loss_X2Y_hr = get_feature_matching_loss(real_hr_Y_feature, fake_hr_Y_feature, 'l2') + \
-                        get_discriminator_loss(fake_hr_Y_logit, tf.ones_like(fake_hr_Y_logit), 'ls')
+    #trans_loss_X2Y_hr = get_feature_matching_loss(real_hr_Y_feature, fake_hr_Y_feature, 'l2') + \
+    #                    get_discriminator_loss(fake_hr_Y_logit, tf.ones_like(fake_hr_Y_logit), 'ls')
     #trans_loss_X2Y_hr = get_discriminator_loss(fake_hr_Y_logit, tf.ones_like(fake_hr_Y_logit), 'ls')
-    #trans_loss_X2Y_hr = get_feature_matching_loss(real_hr_Y_feature, fake_hr_Y_feature, 'l2')
+    trans_loss_X2Y_hr = get_feature_matching_loss(real_hr_Y_feature, fake_hr_Y_feature, 'l2')
 
     disc_loss_hr_Y = get_discriminator_loss(real_hr_Y_logit, tf.ones_like(real_hr_Y_logit), type='ls') + \
                      get_discriminator_loss(pool_hr_Y_logit, tf.zeros_like(pool_hr_Y_logit), type='ls')
@@ -694,9 +694,9 @@ def train(model_path):
         cyclic_loss_lr = cyclic_loss_lr + gradient_loss_lr
 
     # LS GAN
-    trans_loss_X2Y_lr = get_feature_matching_loss(real_lr_Y_feature, fake_lr_Y_feature, 'l2') + \
-                        get_discriminator_loss(fake_lr_Y_logit, tf.ones_like(fake_lr_Y_logit), 'ls')
-    #trans_loss_X2Y_lr = get_feature_matching_loss(real_lr_Y_feature, fake_lr_Y_feature, 'l2')
+    #trans_loss_X2Y_lr = get_feature_matching_loss(real_lr_Y_feature, fake_lr_Y_feature, 'l2') + \
+    #                    get_discriminator_loss(fake_lr_Y_logit, tf.ones_like(fake_lr_Y_logit), 'ls')
+    trans_loss_X2Y_lr = get_feature_matching_loss(real_lr_Y_feature, fake_lr_Y_feature, 'l2')
     #trans_loss_X2Y_lr = get_discriminator_loss(fake_lr_Y_logit, tf.ones_like(fake_lr_Y_logit), 'ls')
 
     disc_loss_lr_Y = get_discriminator_loss(real_lr_Y_logit, tf.ones_like(real_lr_Y_logit), type='ls') + \
@@ -715,7 +715,7 @@ def train(model_path):
     disc_vars_hr = disc_Y_vars_hr
 
     disc_l2_regularizer_hr = tf.add_n([tf.nn.l2_loss(v) for v in disc_vars_hr if 'bias' not in v.name])
-    total_disc_loss_hr = total_disc_loss_hr  # + weight_decay * disc_l2_regularizer_hr
+    total_disc_loss_hr = total_disc_loss_hr + weight_decay * disc_l2_regularizer_hr
 
     trans_X2Y_vars_hr = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=HR_G_scope)
     trans_vars_hr = trans_X2Y_vars_hr
@@ -727,7 +727,7 @@ def train(model_path):
     disc_vars_lr = disc_Y_vars_lr
 
     disc_l2_regularizer_lr = tf.add_n([tf.nn.l2_loss(v) for v in disc_vars_lr if 'bias' not in v.name])
-    total_disc_loss_lr = total_disc_loss_lr  # + weight_decay * disc_l2_regularizer_lr
+    total_disc_loss_lr = total_disc_loss_lr + weight_decay * disc_l2_regularizer_lr
 
     trans_X2Y_vars_lr = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=LR_G_scope)
     trans_vars_lr = trans_X2Y_vars_lr
@@ -770,7 +770,7 @@ def train(model_path):
         # Discriminator draw inputs from image pool with threshold probability
         image_pool_hr = util.ImagePool(maxsize=30, threshold=0.8)
         image_pool_lr = util.ImagePool(maxsize=30, threshold=0.8)
-        learning_rate = 2e-4
+        learning_rate = 1e-3
 
         for e in range(num_epoch):
             trY = shuffle(trY)
@@ -820,7 +820,7 @@ def train(model_path):
                     i_name = f_name.replace('gt', 'input')
                     trX.append(i_name)
 
-                imgs_X_hr, _ = load_images(trX, base_dir=trX_dir, use_augmentation=False, add_eps=True,
+                imgs_X_hr, _ = load_images(trX, base_dir=trX_dir, use_augmentation=False, add_eps=False,
                                      rotate=rot, resize=[input_width, input_height], crop=crop)
 
                 if imgs_X_hr is None:
@@ -829,7 +829,7 @@ def train(model_path):
                 if len(imgs_X_hr[0].shape) != 3:
                     imgs_X_hr = np.expand_dims(imgs_X_hr, axis=-1)
 
-                imgs_X_lr, _ = load_images(trX, base_dir=trX_dir, use_augmentation=False, add_eps=True,
+                imgs_X_lr, _ = load_images(trX, base_dir=trX_dir, use_augmentation=False, add_eps=False,
                                                           rotate=rot, resize=[lr_input_width, lr_input_height], crop=crop)
 
                 if imgs_X_lr is None:
@@ -856,8 +856,12 @@ def train(model_path):
                 total_steps = (total_input_size * num_epoch * 1.0)
 
                 # Cosine learning rate decay
-                lr = 1e-5 + learning_rate * np.cos((np.pi * 7.0 / 16.0) * (cur_steps / total_steps))
-                trans_alpha = 1.0 + alpha * (1.0 - (e * 1.0 / num_epoch))
+                lr = learning_rate * np.cos((np.pi * 7.0 / 16.0) * (cur_steps / total_steps))
+
+                if use_adaptive_alpha is True:
+                    trans_alpha = 1.0 + alpha * (1.0 - (e * 1.0 / num_epoch))
+                else:
+                    trans_alpha = alpha
 
                 _, d_loss_lr = sess.run([disc_optimizer_lr, total_disc_loss_lr],
                                         feed_dict={LR_Y_IN: imgs_Y_lr, LR_X_IN: NonAugmented_imgs_X_lr,
@@ -880,9 +884,9 @@ def train(model_path):
                                                                         b_train: True, LR: learning_rate, ALPHA: trans_alpha})
                         print(util.COLORS.HEADER + ' epoch: ' + str(e) + util.COLORS.ENDC + ', ' +
                               util.COLORS.OKGREEN + 'd_loss_hr: ' + str(d_loss_hr) + util.COLORS.ENDC +
-                              ', ' + util.COLORS.WARNING + 't_loss_hr: ' + str(t_loss_hr) + util.COLORS.ENDC + ', ' +
+                              ', ' + util.COLORS.WARNING + 't_loss_hr: ' + str(t_loss_hr) + util.COLORS.ENDC +
                               ', ' + util.COLORS.WARNING + 't_loss_lr: ' + str(t_loss_lr) + util.COLORS.ENDC + ', ' +
-                              util.COLORS.OKBLUE + 'g_loss_hr: ' + str(x2y_loss_hr) + util.COLORS.ENDC + ', ' + str(trans_alpha))
+                              util.COLORS.OKBLUE + 'g_loss_hr: ' + str(x2y_loss_hr) + util.COLORS.ENDC)
 
                         decoded_images_X2Y = trans_hr[0]
                         final_image = (decoded_images_X2Y[0] * 255.0)
@@ -896,7 +900,7 @@ def train(model_path):
                         print(util.COLORS.HEADER + 'epoch: ' + str(e) + util.COLORS.ENDC + ', ' +
                               util.COLORS.OKGREEN + 'd_loss_lr: ' + str(d_loss_lr) + util.COLORS.ENDC +
                               ', ' + util.COLORS.WARNING + 't_loss_lr: ' + str(t_loss_lr) + util.COLORS.ENDC + ', ' +
-                              util.COLORS.OKBLUE + 'g_loss_lr: ' + str(x2y_loss_lr) + ', ' +
+                              util.COLORS.OKBLUE + 'g_loss_lr: ' + str(x2y_loss_lr) +
                               util.COLORS.ENDC)
                         decoded_images_X2Y = trans_lr[0]
                         final_image = (decoded_images_X2Y[0] * 255.0)
@@ -931,8 +935,8 @@ def test(model_path):
     LR_G_scope = 'lr_translator'
 
     with tf.device('/device:CPU:0'):
-        HR_X_IN = tf.placeholder(tf.float32, [batch_size, input_height, input_width, num_channel])
-        LR_X_IN = tf.placeholder(tf.float32, [batch_size, lr_input_height, lr_input_width, num_channel])
+        HR_X_IN = tf.placeholder(tf.float32, [None, input_height, input_width, num_channel])
+        LR_X_IN = tf.placeholder(tf.float32, [None, lr_input_height, lr_input_width, num_channel])
 
         b_train = tf.placeholder(tf.bool)
 
@@ -958,6 +962,7 @@ def test(model_path):
 
         try:
             saver = tf.train.Saver(var_list=trans_vars)
+
             saver.restore(sess, model_path)
             print(util.COLORS.OKGREEN + 'Model Restored' + util.COLORS.ENDC)
         except:
@@ -1053,6 +1058,7 @@ if __name__ == '__main__':
     parser.add_argument('--pretrain_epoch', type=int, help='num epoch', default=10)
     parser.add_argument('--lr_ratio', type=int, help='low resolution ratio', default=8)
     parser.add_argument('--network_depth', type=int, help='low resolution translator depth', default=8)
+    parser.add_argument('--batch_size', type=int, help='Training batch size', default=4)
 
     args = parser.parse_args()
 
@@ -1093,7 +1099,7 @@ if __name__ == '__main__':
     lr_discriminator_depth = 12
     lr_patch_discriminator_depth = 1
 
-    batch_size = 1  # Instance normalization
+    batch_size = args.batch_size  # Instance normalization
     representation_dim = 512  # Discriminator last feature size.
     num_epoch = args.epoch
     use_identity_loss = True
@@ -1104,8 +1110,10 @@ if __name__ == '__main__':
     weight_decay = 1e-4
     fg_threshold = 0.95
     use_crop_train = False
+    use_adaptive_alpha =  False
 
     if args.mode == 'train':
         train(model_path)
     else:
+        batch_size = 1
         test(model_path)
