@@ -487,7 +487,7 @@ def layer_norm(x, scope="layer_norm", alpha_start=1.0, bias_start=0.0):
     return y
 
 
-def instance_norm(x, scope="layer_norm", alpha_start=1.0, bias_start=0.0):
+def instance_norm(x, scope="instance_norm", alpha_start=1.0, bias_start=0.0, num_grp=4):
     with tf.variable_scope(scope):
         input_dims = x.get_shape().as_list()
 
@@ -496,15 +496,20 @@ def instance_norm(x, scope="layer_norm", alpha_start=1.0, bias_start=0.0):
         w = input_dims[2]
         c = input_dims[3]
 
-        alpha = tf.get_variable('alpha', [c],
+        g_c = c // num_grp
+        alpha = tf.get_variable('alpha', shape=[num_grp, g_c], dtype=tf.float32,
                                 initializer=tf.random_normal_initializer(alpha_start, 0.02, dtype=tf.float32))
-        bias = tf.get_variable('bias', [c],
+        bias = tf.get_variable('bias', [num_grp, g_c],
                                initializer=tf.constant_initializer(bias_start), dtype=tf.float32)
-
-        mean, variance = tf.nn.moments(x, axes=[0, 1, 2], keep_dims=True)
+        l = tf.reshape(x, shape=[-1, h, w, num_grp, g_c])
+        mean, variance = tf.nn.moments(l, axes=[1, 2], keep_dims=True)
+        instance_mean = tf.reshape(mean, shape=[-1, 1, 1, c])
+        instance_variance = tf.reshape(variance, shape=[-1, 1, 1, c])
+        scale = tf.reshape(alpha, shape=[num_grp*g_c])
+        shift = tf.reshape(bias, shape=[num_grp*g_c])
         eps = 1e-5
-        inv = tf.rsqrt(variance + eps)
-        y = alpha * ((x - mean)*inv) + bias
+        inv = tf.rsqrt(instance_variance + eps)
+        y = scale * ((x - instance_mean)*inv) + shift
 
     return y
 
