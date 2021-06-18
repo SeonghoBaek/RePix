@@ -108,9 +108,8 @@ def hr_discriminator(x1, x2, activation='relu', scope='hr_discriminator_network'
         l = layers.conv(x, scope='init', filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
                         non_linear_fn=None, bias=False)
         l = layers.conv_normalize(l, norm=norm_func, b_train=b_train, scope='norm_init')
-        l = act_func(l)
 
-        norm_func = norm
+        l = act_func(l)
 
         if use_patch is True:
             print('HR Discriminator Patch Block : ' + str(l.get_shape().as_list()))
@@ -136,7 +135,7 @@ def hr_discriminator(x1, x2, activation='relu', scope='hr_discriminator_network'
             print('HR Discriminator GP Dims: ' + str(feature.get_shape().as_list()))
 
             logit = layers.conv(last_layer, scope='conv_pred', filter_dims=[3, 3, 1], stride_dims=[1, 1],
-                                non_linear_fn=tf.nn.sigmoid, bias=False)
+                                non_linear_fn=None, bias=False)
             print('HR Discriminator Logit Dims: ' + str(logit.get_shape().as_list()))
         else:
             num_iter = hr_discriminator_depth
@@ -202,9 +201,8 @@ def lr_discriminator(x1, x2, activation='relu', scope='lr_discriminator_network'
         l = layers.conv(x, scope='init', filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
                         non_linear_fn=None, bias=False)
         l = layers.conv_normalize(l, norm=norm_func, b_train=b_train, scope='norm_init')
-        l = act_func(l)
 
-        norm_func = norm
+        l = act_func(l)
 
         if use_patch is True:
             print('LR Discriminator Patch Block : ' + str(l.get_shape().as_list()))
@@ -230,7 +228,7 @@ def lr_discriminator(x1, x2, activation='relu', scope='lr_discriminator_network'
             print('LR Discriminator GP Dims: ' + str(feature.get_shape().as_list()))
 
             logit = layers.conv(last_layer, scope='conv_pred', filter_dims=[3, 3, 1], stride_dims=[1, 1],
-                                non_linear_fn=tf.nn.sigmoid, bias=False)
+                                non_linear_fn=None, bias=False)
             print('LR Discriminator Logit Dims: ' + str(logit.get_shape().as_list()))
         else:
             num_iter = lr_discriminator_depth
@@ -378,7 +376,11 @@ def hr_translator(x, lr_feature, activation='relu', scope='hr_translator', norm=
         l = layers.conv(x, scope='init', filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
                               non_linear_fn=None, bias=False)
         l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='norm_init')
+
         l = act_func(l)
+
+        l = layers.add_residual_dense_block(l, filter_dims=[3, 3, block_depth], num_layers=2,
+                                            act_func=act_func, norm=norm, b_train=b_train, scope='dense_block_1')
 
         shorcut_layers = []
 
@@ -509,7 +511,11 @@ def lr_translator(x, activation='relu', scope='lr_translator', norm='layer', ups
         l = layers.conv(x, scope='init', filter_dims=[3, 3, block_depth], stride_dims=[1, 1],
                         non_linear_fn=None, bias=False)
         l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='norm_init')
+
         l = act_func(l)
+
+        l = layers.add_residual_dense_block(l, filter_dims=[3, 3, block_depth], num_layers=2,
+                                            act_func=act_func, norm=norm, b_train=b_train, scope='dense_block_1')
 
         shorcut_layers = []
 
@@ -634,31 +640,38 @@ def train(model_path):
     config.gpu_options.allow_growth = True
 
     # Low Resolution
-    fake_lr_Y, fake_lr_feature = lr_translator(LR_X_IN, activation='relu', norm='instance', b_train=b_train, scope=LR_G_scope)
+    augmented_LR_X_IN = util.random_black_patches(LR_X_IN, batch_size=batch_size)
+    fake_lr_Y, fake_lr_feature = lr_translator(augmented_LR_X_IN, activation='relu', norm='instance', b_train=b_train, scope=LR_G_scope)
 
     # High Resolution
-    fake_hr_Y = hr_translator(HR_X_IN, fake_lr_feature, activation='relu', norm='instance', b_train=b_train, scope=HR_G_scope)
-
-    if use_identity_loss is True:
-        # Low Resolution
-        id_lr_Y, id_lr_Y_feature = lr_translator(LR_Y_IN, activation='relu', norm='instance', b_train=b_train, scope=LR_G_scope)
-        # High Resolution
-        id_hr_Y = hr_translator(HR_Y_IN, id_lr_Y_feature, activation='relu', norm='instance', b_train=b_train, scope=HR_G_scope)
+    augmented_HR_X_IN = util.random_black_patches(HR_X_IN, batch_size=batch_size)
+    fake_hr_Y = hr_translator(augmented_HR_X_IN, fake_lr_feature, activation='relu', norm='instance', b_train=b_train, scope=HR_G_scope)
 
     # High Resolution
-    pool_hr_Y_feature, pool_hr_Y_logit = hr_discriminator(HR_Y_POOL, HR_X_POOL, activation='relu', norm='instance', b_train=b_train,
+    augmented_HR_Y_POOL = util.random_black_patches(HR_Y_POOL, batch_size=batch_size)
+    pool_hr_Y_feature, pool_hr_Y_logit = hr_discriminator(augmented_HR_Y_POOL, HR_X_POOL, activation='relu', norm='instance', b_train=b_train,
                                                           scope=HR_DY_scope, use_patch=use_patch_discriminator)
-    real_hr_Y_feature, real_hr_Y_logit = hr_discriminator(HR_Y_IN, HR_X_IN, activation='relu', norm='instance', b_train=b_train,
+    augmented_HR_Y_IN = util.random_black_patches(HR_Y_IN, batch_size=batch_size)
+    real_hr_Y_feature, real_hr_Y_logit = hr_discriminator(augmented_HR_Y_IN, HR_X_IN, activation='relu', norm='instance', b_train=b_train,
                                                           scope=HR_DY_scope, use_patch=use_patch_discriminator)
-    fake_hr_Y_feature, fake_hr_Y_logit = hr_discriminator(fake_hr_Y, HR_X_IN, activation='relu', norm='instance', b_train=b_train,
+    augmented_FAKE_Y_IN = util.random_black_patches(fake_hr_Y, batch_size=batch_size)
+    fake_hr_Y_feature, fake_hr_Y_logit = hr_discriminator(augmented_FAKE_Y_IN, HR_X_IN, activation='relu', norm='instance', b_train=b_train,
                                                           scope=HR_DY_scope, use_patch=use_patch_discriminator)
     # Low Resolution
-    pool_lr_Y_feature, pool_lr_Y_logit = lr_discriminator(LR_Y_POOL, LR_X_POOL, activation='relu', norm='instance', b_train=b_train,
+    augmented_LR_Y_POOL = util.random_black_patches(LR_Y_POOL, batch_size=batch_size)
+    pool_lr_Y_feature, pool_lr_Y_logit = lr_discriminator(augmented_LR_Y_POOL, LR_X_POOL, activation='relu', norm='instance', b_train=b_train,
                                                           scope=LR_DY_scope, use_patch=use_patch_discriminator)
-    real_lr_Y_feature, real_lr_Y_logit = lr_discriminator(LR_Y_IN, LR_X_IN, activation='relu', norm='instance', b_train=b_train,
+    augmented_LR_Y_IN = util.random_black_patches(LR_Y_IN, batch_size=batch_size)
+    real_lr_Y_feature, real_lr_Y_logit = lr_discriminator(augmented_LR_Y_IN, LR_X_IN, activation='relu', norm='instance', b_train=b_train,
                                                           scope=LR_DY_scope, use_patch=use_patch_discriminator)
-    fake_lr_Y_feature, fake_lr_Y_logit = lr_discriminator(fake_lr_Y, LR_X_IN, activation='relu', norm='instance', b_train=b_train,
+    augmented_FAKE_LR_Y_IN = util.random_black_patches(fake_lr_Y, batch_size=batch_size)
+    fake_lr_Y_feature, fake_lr_Y_logit = lr_discriminator(augmented_FAKE_LR_Y_IN, LR_X_IN, activation='relu', norm='instance', b_train=b_train,
                                                           scope=LR_DY_scope, use_patch=use_patch_discriminator)
+    if use_identity_loss is True:
+        # Low Resolution
+        id_lr_Y, id_lr_Y_feature = lr_translator(augmented_LR_Y_IN, activation='relu', norm='instance', b_train=b_train, scope=LR_G_scope)
+        # High Resolution
+        id_hr_Y = hr_translator(augmented_HR_Y_IN, id_lr_Y_feature, activation='relu', norm='instance', b_train=b_train, scope=HR_G_scope)
 
     # High Resolution Loss
     reconstruction_loss_hr_Y = get_residual_loss(HR_Y_IN, fake_hr_Y, type='l1')
@@ -669,10 +682,10 @@ def train(model_path):
         cyclic_loss_hr = cyclic_loss_hr + gradient_loss_hr
 
     # LS GAN
-    #trans_loss_X2Y_hr = get_feature_matching_loss(real_hr_Y_feature, fake_hr_Y_feature, 'l2') + \
-    #                    get_discriminator_loss(fake_hr_Y_logit, tf.ones_like(fake_hr_Y_logit), 'ls')
+    trans_loss_X2Y_hr = get_feature_matching_loss(real_hr_Y_feature, fake_hr_Y_feature, 'l2') + \
+                        get_discriminator_loss(fake_hr_Y_logit, tf.ones_like(fake_hr_Y_logit), 'ls')
     #trans_loss_X2Y_hr = get_discriminator_loss(fake_hr_Y_logit, tf.ones_like(fake_hr_Y_logit), 'ls')
-    trans_loss_X2Y_hr = get_feature_matching_loss(real_hr_Y_feature, fake_hr_Y_feature, 'l2')
+    #trans_loss_X2Y_hr = get_feature_matching_loss(real_hr_Y_feature, fake_hr_Y_feature, 'l2')
 
     disc_loss_hr_Y = get_discriminator_loss(real_hr_Y_logit, tf.ones_like(real_hr_Y_logit), type='ls') + \
                      get_discriminator_loss(pool_hr_Y_logit, tf.zeros_like(pool_hr_Y_logit), type='ls')
@@ -694,9 +707,9 @@ def train(model_path):
         cyclic_loss_lr = cyclic_loss_lr + gradient_loss_lr
 
     # LS GAN
-    #trans_loss_X2Y_lr = get_feature_matching_loss(real_lr_Y_feature, fake_lr_Y_feature, 'l2') + \
-    #                    get_discriminator_loss(fake_lr_Y_logit, tf.ones_like(fake_lr_Y_logit), 'ls')
-    trans_loss_X2Y_lr = get_feature_matching_loss(real_lr_Y_feature, fake_lr_Y_feature, 'l2')
+    trans_loss_X2Y_lr = get_feature_matching_loss(real_lr_Y_feature, fake_lr_Y_feature, 'l2') + \
+                        get_discriminator_loss(fake_lr_Y_logit, tf.ones_like(fake_lr_Y_logit), 'ls')
+    #trans_loss_X2Y_lr = get_feature_matching_loss(real_lr_Y_feature, fake_lr_Y_feature, 'l2')
     #trans_loss_X2Y_lr = get_discriminator_loss(fake_lr_Y_logit, tf.ones_like(fake_lr_Y_logit), 'ls')
 
     disc_loss_lr_Y = get_discriminator_loss(real_lr_Y_logit, tf.ones_like(real_lr_Y_logit), type='ls') + \
@@ -1074,8 +1087,8 @@ if __name__ == '__main__':
     postproc_smoothness = args.smoothness
     postproc_iteration = args.iteration
     use_attention = args.use_attention
-    use_unet = True
-    use_unet_hr = True
+    use_unet = False
+    use_unet_hr = False
     use_refinement = False
     # Input image will be resized.
     input_width = args.resize
