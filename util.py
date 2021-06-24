@@ -676,8 +676,19 @@ def random_rgb_to_gray(image,
     return image
 
 
+def random_augment_brightness_constrast(images, probability=0.5, seed=None):
+    with tf.name_scope('RandomAugment', values=[images]):
+        random_prob = tf.random_uniform([], minval=0.0, maxval=1.0, dtype=tf.float32, seed=seed)
+
+        image = tf.cond(tf.greater(random_prob, probability),
+                        lambda: random_adjust_brightness(image=images),
+                        lambda: random_adjust_contrast(image=images))
+        return image
+
+
 def random_adjust_brightness(image,
-                             max_delta=0.2,
+                             max_delta=0.5,
+                             probability=0.5,
                              seed=None):
   """Randomly adjusts brightness.
   Makes sure the output image is still between 0 and 255.
@@ -692,8 +703,15 @@ def random_adjust_brightness(image,
   """
   with tf.name_scope('RandomAdjustBrightness', values=[image]):
     delta = tf.random_uniform([], -max_delta, max_delta, seed=seed)
-    image = tf.image.adjust_brightness(image / 255, delta) * 255
-    image = tf.clip_by_value(image, clip_value_min=0.0, clip_value_max=255.0)
+    #image = tf.image.adjust_brightness(image / 255, delta) * 255
+    #image = tf.clip_by_value(image, clip_value_min=0.0, clip_value_max=255.0)
+    #image = tf.image.adjust_brightness(image, delta)
+    random_prob = tf.random_uniform([], minval=0.0, maxval=1.0, dtype=tf.float32, seed=seed)
+    image = tf.cond(
+        tf.greater(random_prob, probability), lambda: image,
+        functools.partial(tf.image.adjust_brightness, image=image, delta=delta))
+
+    image = tf.clip_by_value(image, clip_value_min=0.0, clip_value_max=1.0)
 
     return image
 
@@ -701,10 +719,11 @@ def random_adjust_brightness(image,
 def random_adjust_contrast(image,
                            min_delta=0.8,
                            max_delta=1.25,
+                           probability=0.5,
                            seed=None):
-  """Randomly adjusts contrast.
-  Makes sure the output image is still between 0 and 255.
-  Args:
+    """Randomly adjusts contrast.
+    Makes sure the output image is still between 0 and 255.
+    Args:
     image: rank 3 float32 tensor contains 1 image -> [height, width, channels]
            with pixel values varying between [0, 255].
     min_delta: see max_delta.
@@ -712,13 +731,22 @@ def random_adjust_contrast(image,
                value between min_delta and max_delta. This value will be
                multiplied to the current contrast of the image.
     seed: random seed.
-  Returns:
+    Returns:
     image: image which is the same shape as input image.
-  """
-  with tf.name_scope('RandomAdjustContrast', values=[image]):
-    contrast_factor = tf.random_uniform([], min_delta, max_delta, seed=seed)
-    image = tf.image.adjust_contrast(image / 255, contrast_factor) * 255
-    image = tf.clip_by_value(image, clip_value_min=0.0, clip_value_max=255.0)
+    """
+    with tf.name_scope('RandomAdjustContrast', values=[image]):
+        contrast_factor = tf.random_uniform([], min_delta, max_delta, seed=seed)
+        #image = tf.image.adjust_contrast(image / 255, contrast_factor) * 255
+        #image = tf.clip_by_value(image, clip_value_min=0.0, clip_value_max=255.0)
+
+        #image = tf.image.adjust_contrast(image, contrast_factor)
+        #image = tf.clip_by_value(image, clip_value_min=0.0, clip_value_max=1.0)
+
+        random_prob = tf.random_uniform([], minval=0.0, maxval=1.0, dtype=tf.float32, seed=seed)
+        image = tf.cond(
+            tf.greater(random_prob, probability), lambda: image,
+            functools.partial(tf.image.adjust_contrast, images=image, contrast_factor=contrast_factor))
+        image = tf.clip_by_value(image, clip_value_min=0.0, clip_value_max=1.0)
 
     return image
 
@@ -808,7 +836,7 @@ def random_distort_color(image, color_ordering=0):
 
 
 def random_black_patches(image,
-                         max_black_patches=10,
+                         max_black_patches=3,
                          probability=0.5,
                          size_to_image_ratio=0.1,
                          random_seed=None,
@@ -881,7 +909,3 @@ def test(path):
         Y_img_file = os.path.join(path, f_name).replace("\\", "/")
         print(Y_img_file)
         create_patch(Y_img_file, ratio=2)
-
-
-#test('data/train/alse/contact/Y')
-#test('data/train/alse/contact/X')
