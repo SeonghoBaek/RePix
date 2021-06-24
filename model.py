@@ -14,6 +14,7 @@ import layers
 import argparse
 import time
 import post_proc
+import functools
 
 
 def load_images(file_name_list, base_dir, crop=None, use_augmentation=False, add_eps=False, rotate=-1, resize=[240, 240]):
@@ -111,6 +112,9 @@ def hr_discriminator(x1, x2, activation='relu', scope='hr_discriminator_network'
 
         l = act_func(l)
 
+        l = layers.add_residual_dense_block(l, filter_dims=[3, 3, block_depth], num_layers=2,
+                                            act_func=act_func, norm=norm, b_train=b_train, scope='dense_block_1')
+
         if use_patch is True:
             print('HR Discriminator Patch Block : ' + str(l.get_shape().as_list()))
             downsample_num_itr = int(np.log2(input_width // 64)) # int(np.log2(lr_ratio))
@@ -203,6 +207,9 @@ def lr_discriminator(x1, x2, activation='relu', scope='lr_discriminator_network'
         l = layers.conv_normalize(l, norm=norm_func, b_train=b_train, scope='norm_init')
 
         l = act_func(l)
+
+        l = layers.add_residual_dense_block(l, filter_dims=[3, 3, block_depth], num_layers=2,
+                                            act_func=act_func, norm=norm, b_train=b_train, scope='dense_block_1')
 
         if use_patch is True:
             print('LR Discriminator Patch Block : ' + str(l.get_shape().as_list()))
@@ -403,11 +410,11 @@ def hr_translator(x, lr_feature, activation='relu', scope='hr_translator', norm=
 
         if hr_use_concat is True:
             l = tf.concat([l, lr_feature], axis=-1)
-            l = layers.conv(l, scope='concat', filter_dims=[3, 3, block_depth],
+            l = layers.conv(l, scope='concat_front', filter_dims=[3, 3, block_depth],
                             stride_dims=[1, 1], non_linear_fn=None)
-            l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='concat_norm')
+            l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='concat_norm_front')
             l = act_func(l)
-            print('HR_Concat layer: ' + str(l.get_shape().as_list()))
+            print('HR_Concat_Front layer: ' + str(l.get_shape().as_list()))
         else:
             l = tf.add(l, lr_feature)
 
@@ -417,6 +424,17 @@ def hr_translator(x, lr_feature, activation='relu', scope='hr_translator', norm=
             l = layers.add_se_residual_block(l, filter_dims=[3, 3, block_depth], num_layers=2, act_func=act_func,
                                              norm=norm, b_train=b_train, use_dilation=False,
                                              scope='bt_block_' + str(i))
+        '''
+        if hr_use_concat is True:
+            l = tf.concat([l, lr_feature], axis=-1)
+            l = layers.conv(l, scope='concat_end', filter_dims=[3, 3, block_depth],
+                            stride_dims=[1, 1], non_linear_fn=None)
+            l = layers.conv_normalize(l, norm=norm, b_train=b_train, scope='concat_norm_end')
+            l = act_func(l)
+            print('HR_Concat_End layer: ' + str(l.get_shape().as_list()))
+        else:
+            l = tf.add(l, lr_feature)
+        '''
 
         # Upsample stage
         for i in range(upsample_num_itr):
@@ -640,38 +658,41 @@ def train(model_path):
     config.gpu_options.allow_growth = True
 
     # Low Resolution
-    augmented_LR_X_IN = util.random_black_patches(LR_X_IN, batch_size=batch_size)
+    augmented_LR_X_IN = util.random_augment_brightness_constrast(LR_X_IN, probability=augmentation_probability)
+    #augmented_LR_X_IN = util.random_black_patches(augmented_LR_X_IN, batch_size=batch_size, probability=0.3)
     fake_lr_Y, fake_lr_feature = lr_translator(augmented_LR_X_IN, activation='relu', norm='instance', b_train=b_train, scope=LR_G_scope)
 
     # High Resolution
-    augmented_HR_X_IN = util.random_black_patches(HR_X_IN, batch_size=batch_size)
+    augmented_HR_X_IN = util.random_augment_brightness_constrast(HR_X_IN, probability=augmentation_probability)
+    #augmented_HR_X_IN = util.random_black_patches(augmented_HR_X_IN, batch_size=batch_size, probability=0.3)
     fake_hr_Y = hr_translator(augmented_HR_X_IN, fake_lr_feature, activation='relu', norm='instance', b_train=b_train, scope=HR_G_scope)
 
     # High Resolution
-    augmented_HR_Y_POOL = util.random_black_patches(HR_Y_POOL, batch_size=batch_size)
-    pool_hr_Y_feature, pool_hr_Y_logit = hr_discriminator(augmented_HR_Y_POOL, HR_X_POOL, activation='relu', norm='instance', b_train=b_train,
+    augmented_HR_X_POOL = util.random_augment_brightness_constrast(HR_X_POOL, probability=augmentation_probability)
+    #augmented_HR_X_POOL = util.random_black_patches(augmented_HR_X_POOL, batch_size=batch_size, probability=augmentation_probability)
+    pool_hr_Y_feature, pool_hr_Y_logit = hr_discriminator(HR_Y_POOL, augmented_HR_X_POOL, activation='relu', norm='instance', b_train=b_train,
                                                           scope=HR_DY_scope, use_patch=use_patch_discriminator)
-    augmented_HR_Y_IN = util.random_black_patches(HR_Y_IN, batch_size=batch_size)
-    real_hr_Y_feature, real_hr_Y_logit = hr_discriminator(augmented_HR_Y_IN, HR_X_IN, activation='relu', norm='instance', b_train=b_train,
+
+    real_hr_Y_feature, real_hr_Y_logit = hr_discriminator(HR_Y_IN, augmented_HR_X_IN, activation='relu', norm='instance', b_train=b_train,
                                                           scope=HR_DY_scope, use_patch=use_patch_discriminator)
-    augmented_FAKE_Y_IN = util.random_black_patches(fake_hr_Y, batch_size=batch_size)
-    fake_hr_Y_feature, fake_hr_Y_logit = hr_discriminator(augmented_FAKE_Y_IN, HR_X_IN, activation='relu', norm='instance', b_train=b_train,
+    fake_hr_Y_feature, fake_hr_Y_logit = hr_discriminator(fake_hr_Y, augmented_HR_X_IN, activation='relu', norm='instance', b_train=b_train,
                                                           scope=HR_DY_scope, use_patch=use_patch_discriminator)
     # Low Resolution
-    augmented_LR_Y_POOL = util.random_black_patches(LR_Y_POOL, batch_size=batch_size)
-    pool_lr_Y_feature, pool_lr_Y_logit = lr_discriminator(augmented_LR_Y_POOL, LR_X_POOL, activation='relu', norm='instance', b_train=b_train,
+    augmented_LR_X_POOL = util.random_augment_brightness_constrast(LR_X_POOL, probability=augmentation_probability)
+    #augmented_LR_X_POOL = util.random_black_patches(augmented_LR_X_POOL, batch_size=batch_size, probability=augmentation_probability)
+    pool_lr_Y_feature, pool_lr_Y_logit = lr_discriminator(LR_Y_POOL, augmented_LR_X_POOL, activation='relu', norm='instance', b_train=b_train,
                                                           scope=LR_DY_scope, use_patch=use_patch_discriminator)
-    augmented_LR_Y_IN = util.random_black_patches(LR_Y_IN, batch_size=batch_size)
-    real_lr_Y_feature, real_lr_Y_logit = lr_discriminator(augmented_LR_Y_IN, LR_X_IN, activation='relu', norm='instance', b_train=b_train,
+
+    real_lr_Y_feature, real_lr_Y_logit = lr_discriminator(LR_Y_IN, augmented_LR_X_IN, activation='relu', norm='instance', b_train=b_train,
                                                           scope=LR_DY_scope, use_patch=use_patch_discriminator)
-    augmented_FAKE_LR_Y_IN = util.random_black_patches(fake_lr_Y, batch_size=batch_size)
-    fake_lr_Y_feature, fake_lr_Y_logit = lr_discriminator(augmented_FAKE_LR_Y_IN, LR_X_IN, activation='relu', norm='instance', b_train=b_train,
+    fake_lr_Y_feature, fake_lr_Y_logit = lr_discriminator(fake_lr_Y, augmented_LR_X_IN, activation='relu', norm='instance', b_train=b_train,
                                                           scope=LR_DY_scope, use_patch=use_patch_discriminator)
+
     if use_identity_loss is True:
         # Low Resolution
-        id_lr_Y, id_lr_Y_feature = lr_translator(augmented_LR_Y_IN, activation='relu', norm='instance', b_train=b_train, scope=LR_G_scope)
+        id_lr_Y, id_lr_Y_feature = lr_translator(LR_Y_IN, activation='relu', norm='instance', b_train=b_train, scope=LR_G_scope)
         # High Resolution
-        id_hr_Y = hr_translator(augmented_HR_Y_IN, id_lr_Y_feature, activation='relu', norm='instance', b_train=b_train, scope=HR_G_scope)
+        id_hr_Y = hr_translator(HR_Y_IN, id_lr_Y_feature, activation='relu', norm='instance', b_train=b_train, scope=HR_G_scope)
 
     # High Resolution Loss
     reconstruction_loss_hr_Y = get_residual_loss(HR_Y_IN, fake_hr_Y, type='l1')
@@ -1087,8 +1108,8 @@ if __name__ == '__main__':
     postproc_smoothness = args.smoothness
     postproc_iteration = args.iteration
     use_attention = args.use_attention
-    use_unet = False
-    use_unet_hr = False
+    use_unet = True
+    use_unet_hr = True
     use_refinement = False
     # Input image will be resized.
     input_width = args.resize
@@ -1099,8 +1120,8 @@ if __name__ == '__main__':
     hr_bottleneck_depth = 12
     hr_refinement_depth = 2
     hr_discriminator_depth = 12
-    hr_patch_discriminator_depth = 1
-    hr_use_concat = True
+    hr_patch_discriminator_depth = 4
+    hr_use_concat = False
 
     lr_pretrain_epoch = args.pretrain_epoch
     lr_bottleneck_depth = args.network_depth  # Number of translator bottle neck layers or blocks
@@ -1123,7 +1144,8 @@ if __name__ == '__main__':
     weight_decay = 1e-4
     fg_threshold = 0.95
     use_crop_train = False
-    use_adaptive_alpha =  False
+    use_adaptive_alpha = False
+    augmentation_probability = 0.5
 
     if args.mode == 'train':
         train(model_path)
