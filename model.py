@@ -658,34 +658,38 @@ def train(model_path):
     config.gpu_options.allow_growth = True
 
     # Low Resolution
-    augmented_LR_X_IN = util.random_augment_brightness_constrast(LR_X_IN, probability=augmentation_probability)
-    #augmented_LR_X_IN = util.random_black_patches(augmented_LR_X_IN, batch_size=batch_size, probability=0.3)
+    augmented_LR_X_IN = util.random_augments_hard(LR_X_IN, probability=augmentation_probability, batch_size=batch_size)
     fake_lr_Y, fake_lr_feature = lr_translator(augmented_LR_X_IN, activation='relu', norm='instance', b_train=b_train, scope=LR_G_scope)
+    non_augmented_fake_lr_Y, non_augmented_fake_lr_feature = lr_translator(LR_X_IN, activation='relu', norm='instance', b_train=b_train, scope=LR_G_scope)
 
     # High Resolution
-    augmented_HR_X_IN = util.random_augment_brightness_constrast(HR_X_IN, probability=augmentation_probability)
-    #augmented_HR_X_IN = util.random_black_patches(augmented_HR_X_IN, batch_size=batch_size, probability=0.3)
+    augmented_HR_X_IN = util.random_augments_hard(HR_X_IN, probability=augmentation_probability, batch_size=batch_size)
     fake_hr_Y = hr_translator(augmented_HR_X_IN, fake_lr_feature, activation='relu', norm='instance', b_train=b_train, scope=HR_G_scope)
+    non_augmented_fake_hr_Y = hr_translator(HR_X_IN, non_augmented_fake_lr_feature, activation='relu', norm='instance', b_train=b_train, scope=HR_G_scope)
 
     # High Resolution
-    augmented_HR_X_POOL = util.random_augment_brightness_constrast(HR_X_POOL, probability=augmentation_probability)
-    #augmented_HR_X_POOL = util.random_black_patches(augmented_HR_X_POOL, batch_size=batch_size, probability=augmentation_probability)
+    augmented_HR_X_POOL = util.random_augments_hard(HR_X_POOL, probability=augmentation_probability, batch_size=batch_size)
     pool_hr_Y_feature, pool_hr_Y_logit = hr_discriminator(HR_Y_POOL, augmented_HR_X_POOL, activation='relu', norm='instance', b_train=b_train,
                                                           scope=HR_DY_scope, use_patch=use_patch_discriminator)
 
-    real_hr_Y_feature, real_hr_Y_logit = hr_discriminator(HR_Y_IN, augmented_HR_X_IN, activation='relu', norm='instance', b_train=b_train,
+    augmented_HR_Y_IN = util.random_augments_hard(HR_Y_IN, probability=augmentation_probability, batch_size=batch_size)
+    real_hr_Y_feature, real_hr_Y_logit = hr_discriminator(augmented_HR_Y_IN, augmented_HR_X_IN, activation='relu', norm='instance', b_train=b_train,
                                                           scope=HR_DY_scope, use_patch=use_patch_discriminator)
-    fake_hr_Y_feature, fake_hr_Y_logit = hr_discriminator(fake_hr_Y, augmented_HR_X_IN, activation='relu', norm='instance', b_train=b_train,
+
+    augmented_fake_hr_Y = util.random_augments_hard(fake_hr_Y, probability=augmentation_probability, batch_size=batch_size)
+    fake_hr_Y_feature, fake_hr_Y_logit = hr_discriminator(augmented_fake_hr_Y, augmented_HR_X_IN, activation='relu', norm='instance', b_train=b_train,
                                                           scope=HR_DY_scope, use_patch=use_patch_discriminator)
     # Low Resolution
-    augmented_LR_X_POOL = util.random_augment_brightness_constrast(LR_X_POOL, probability=augmentation_probability)
-    #augmented_LR_X_POOL = util.random_black_patches(augmented_LR_X_POOL, batch_size=batch_size, probability=augmentation_probability)
+    augmented_LR_X_POOL = util.random_augments_hard(LR_X_POOL, probability=augmentation_probability, batch_size=batch_size)
     pool_lr_Y_feature, pool_lr_Y_logit = lr_discriminator(LR_Y_POOL, augmented_LR_X_POOL, activation='relu', norm='instance', b_train=b_train,
                                                           scope=LR_DY_scope, use_patch=use_patch_discriminator)
 
-    real_lr_Y_feature, real_lr_Y_logit = lr_discriminator(LR_Y_IN, augmented_LR_X_IN, activation='relu', norm='instance', b_train=b_train,
+    augmented_LR_Y_IN = util.random_augments_hard(LR_Y_IN, probability=augmentation_probability, batch_size=batch_size)
+    real_lr_Y_feature, real_lr_Y_logit = lr_discriminator(augmented_LR_Y_IN, augmented_LR_X_IN, activation='relu', norm='instance', b_train=b_train,
                                                           scope=LR_DY_scope, use_patch=use_patch_discriminator)
-    fake_lr_Y_feature, fake_lr_Y_logit = lr_discriminator(fake_lr_Y, augmented_LR_X_IN, activation='relu', norm='instance', b_train=b_train,
+
+    augmented_fake_lr_Y = util.random_augments_hard(fake_lr_Y, probability=augmentation_probability, batch_size=batch_size)
+    fake_lr_Y_feature, fake_lr_Y_logit = lr_discriminator(augmented_fake_lr_Y, augmented_LR_X_IN, activation='relu', norm='instance', b_train=b_train,
                                                           scope=LR_DY_scope, use_patch=use_patch_discriminator)
 
     if use_identity_loss is True:
@@ -695,7 +699,7 @@ def train(model_path):
         id_hr_Y = hr_translator(HR_Y_IN, id_lr_Y_feature, activation='relu', norm='instance', b_train=b_train, scope=HR_G_scope)
 
     # High Resolution Loss
-    reconstruction_loss_hr_Y = get_residual_loss(HR_Y_IN, fake_hr_Y, type='l1')
+    reconstruction_loss_hr_Y = get_residual_loss(HR_Y_IN, non_augmented_fake_hr_Y, type='l1')
     cyclic_loss_hr = ALPHA * reconstruction_loss_hr_Y
 
     if use_gradient_loss is True:
@@ -720,7 +724,7 @@ def train(model_path):
     total_disc_loss_hr = disc_loss_hr_Y
 
     # Low Resolution Loss
-    reconstruction_loss_lr_Y = get_residual_loss(LR_Y_IN, fake_lr_Y, type='l1')
+    reconstruction_loss_lr_Y = get_residual_loss(LR_Y_IN, non_augmented_fake_lr_Y, type='l1')
     cyclic_loss_lr = ALPHA * reconstruction_loss_lr_Y
 
     if use_gradient_loss is True:
@@ -813,26 +817,12 @@ def train(model_path):
             itr = 0
 
             for start, end in training_batch:
-                rot = np.random.randint(-1, 3)
-
-                if use_crop_train is True:
-                    if np.random.randint(0, 10) < 5:
-                        crop = None
-                    else:
-                        crop_x = np.random.randint(0, 2)
-                        crop_y = np.random.randint(0, 2)
-                        crop = [crop_x, crop_y]
-                else:
-                    crop = None
-
-                imgs_Y_hr, _ = load_images(trY[start:end], base_dir=trY_dir, use_augmentation=False, add_eps=False,
-                                     rotate=rot, resize=[input_width, input_height], crop=crop)
+                imgs_Y_hr, _ = load_images(trY[start:end], base_dir=trY_dir, resize=[input_width, input_height])
 
                 if imgs_Y_hr is None:
                     continue
 
-                imgs_Y_lr, _ = load_images(trY[start:end], base_dir=trY_dir, use_augmentation=False, add_eps=False,
-                                           rotate=rot, resize=[lr_input_width, lr_input_height], crop=crop)
+                imgs_Y_lr, _ = load_images(trY[start:end], base_dir=trY_dir, resize=[lr_input_width, lr_input_height])
 
                 if imgs_Y_hr is None:
                     continue
@@ -854,8 +844,7 @@ def train(model_path):
                     i_name = f_name.replace('gt', 'input')
                     trX.append(i_name)
 
-                imgs_X_hr, _ = load_images(trX, base_dir=trX_dir, use_augmentation=False, add_eps=False,
-                                     rotate=rot, resize=[input_width, input_height], crop=crop)
+                imgs_X_hr, _ = load_images(trX, base_dir=trX_dir, resize=[input_width, input_height])
 
                 if imgs_X_hr is None:
                     continue
@@ -863,8 +852,7 @@ def train(model_path):
                 if len(imgs_X_hr[0].shape) != 3:
                     imgs_X_hr = np.expand_dims(imgs_X_hr, axis=-1)
 
-                imgs_X_lr, _ = load_images(trX, base_dir=trX_dir, use_augmentation=False, add_eps=False,
-                                                          rotate=rot, resize=[lr_input_width, lr_input_height], crop=crop)
+                imgs_X_lr, _ = load_images(trX, base_dir=trX_dir, resize=[lr_input_width, lr_input_height])
 
                 if imgs_X_lr is None:
                     continue
@@ -922,9 +910,13 @@ def train(model_path):
                               ', ' + util.COLORS.WARNING + 't_loss_lr: ' + str(t_loss_lr) + util.COLORS.ENDC + ', ' +
                               util.COLORS.OKBLUE + 'g_loss_hr: ' + str(x2y_loss_hr) + util.COLORS.ENDC)
 
+                        trans_hr = sess.run([non_augmented_fake_hr_Y], feed_dict={HR_X_IN: imgs_X_hr, LR_X_IN: imgs_X_lr, b_train: True})
+
                         decoded_images_X2Y = trans_hr[0]
-                        final_image = (decoded_images_X2Y[0] * 255.0)
-                        cv2.imwrite(out_dir + '/' + trX[0], final_image)
+
+                        for num_outputs in range(batch_size):
+                            final_image = (decoded_images_X2Y[num_outputs] * 255.0)
+                            cv2.imwrite(out_dir + '/' + trX[num_outputs], final_image)
                     else:
                         _, t_loss_lr, x2y_loss_lr = sess.run(
                             [trans_optimizer_lr, total_trans_loss_lr, trans_loss_X2Y_lr],
@@ -936,9 +928,13 @@ def train(model_path):
                               ', ' + util.COLORS.WARNING + 't_loss_lr: ' + str(t_loss_lr) + util.COLORS.ENDC + ', ' +
                               util.COLORS.OKBLUE + 'g_loss_lr: ' + str(x2y_loss_lr) +
                               util.COLORS.ENDC)
+
+                        trans_lr = sess.run([non_augmented_fake_lr_Y], feed_dict={LR_X_IN: imgs_X_lr, b_train: True})
                         decoded_images_X2Y = trans_lr[0]
-                        final_image = (decoded_images_X2Y[0] * 255.0)
-                        cv2.imwrite(out_dir + '/' + trX[0], final_image)
+
+                        for num_outputs in range(batch_size):
+                            final_image = (decoded_images_X2Y[num_outputs] * 255.0)
+                            cv2.imwrite(out_dir + '/' + trX[num_outputs], final_image)
 
                 itr += 1
 
@@ -1108,8 +1104,8 @@ if __name__ == '__main__':
     postproc_smoothness = args.smoothness
     postproc_iteration = args.iteration
     use_attention = args.use_attention
-    use_unet = True
-    use_unet_hr = True
+    use_unet = False
+    use_unet_hr = False
     use_refinement = False
     # Input image will be resized.
     input_width = args.resize
