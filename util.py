@@ -676,18 +676,49 @@ def random_rgb_to_gray(image,
     return image
 
 
-def random_augment_brightness_constrast(images, probability=0.5, seed=None):
+def random_augment_brightness_cutout(images, probability=0.5, seed=None, batch_size=1):
     with tf.name_scope('RandomAugment', values=[images]):
         random_prob = tf.random_uniform([], minval=0.0, maxval=1.0, dtype=tf.float32, seed=seed)
 
         image = tf.cond(tf.greater(random_prob, probability),
                         lambda: random_adjust_brightness(image=images),
-                        lambda: random_adjust_contrast(image=images))
+                        lambda: random_black_patches(image=images, batch_size=batch_size))
+
+        return image
+
+
+def random_augments_hard(images, probability=0.7, seed=None, batch_size=1):
+    with tf.name_scope('RandomAugment', values=[images]):
+        random_prob = tf.random_uniform([], minval=0.0, maxval=1.0, dtype=tf.float32, seed=seed)
+
+        image = tf.cond(tf.greater(random_prob, probability),
+                        lambda: random_black_patches(image=images, batch_size=batch_size),
+                        lambda: random_augments(images=images, probability=probability))
+        return image
+
+
+def random_augments(images, probability=0.5, seed=None):
+    with tf.name_scope('RandomAugment', values=[images]):
+        random_prob = tf.random_uniform([], minval=0.0, maxval=1.0, dtype=tf.float32, seed=seed)
+
+        image = tf.cond(tf.greater(random_prob, probability),
+                        lambda: random_augment_brightness_constrast(images=images, probability=probability),
+                        lambda: random_rotation90(image=images))
+        return image
+
+
+def random_augment_brightness_constrast(images, probability=0.2, seed=None):
+    with tf.name_scope('RandomAugmentBC', values=[images]):
+        random_prob = tf.random_uniform([], minval=0.0, maxval=1.0, dtype=tf.float32, seed=seed)
+
+        image = tf.cond(tf.greater(random_prob, probability),
+                        lambda: random_adjust_brightness(image=images),
+                        lambda: 0.5 * (images + tf.stop_gradient(random_adjust_contrast(image=images))))
         return image
 
 
 def random_adjust_brightness(image,
-                             max_delta=0.5,
+                             max_delta=0.2,
                              probability=0.5,
                              seed=None):
   """Randomly adjusts brightness.
@@ -717,8 +748,8 @@ def random_adjust_brightness(image,
 
 
 def random_adjust_contrast(image,
-                           min_delta=0.8,
-                           max_delta=1.25,
+                           min_delta=0.9,
+                           max_delta=1.1,
                            probability=0.5,
                            seed=None):
     """Randomly adjusts contrast.
@@ -900,12 +931,3 @@ def random_black_patches(image,
           functools.partial(add_black_patch_to_image, image=image, idx=idx, batch_size=batch_size))
 
     return image
-
-
-def test(path):
-    input_Y = os.listdir(path)
-
-    for f_name in input_Y:
-        Y_img_file = os.path.join(path, f_name).replace("\\", "/")
-        print(Y_img_file)
-        create_patch(Y_img_file, ratio=2)
