@@ -170,7 +170,7 @@ def conv(input, scope, filter_dims, stride_dims, padding='SAME',
     filter_h, filter_w, num_channels_out = filter_dims
     stride_h, stride_w = stride_dims
 
-    with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+    with tf.variable_scope(scope):
 
         conv_weight = tf.get_variable('conv_weight',
                                       shape=[filter_h, filter_w, num_channels_in, num_channels_out],
@@ -206,7 +206,7 @@ def conv(input, scope, filter_dims, stride_dims, padding='SAME',
 
 
 def batch_norm_conv(x, b_train, scope):
-    with tf.variable_scope(scope,  reuse=tf.AUTO_REUSE):
+    with tf.variable_scope(scope):
         n_out = x.get_shape().as_list()[-1]
 
         beta = tf.get_variable('beta', initializer=tf.constant(0.0, shape=[n_out]))
@@ -380,14 +380,14 @@ def self_attention(x, channels=0, act_func=tf.nn.relu, scope='attention'):
             channels = num_channels
 
         f = conv(x, scope='f_conv', filter_dims=[1, 1, channels // 8], stride_dims=[1, 1], non_linear_fn=act_func)
-        f = tf.layers.max_pooling2d(f, pool_size=2, strides=2, padding='SAME')
+        f = tf.layers.max_pooling2d(f, pool_size=4, strides=4, padding='SAME')
         print('attention f dims: ' + str(f.get_shape().as_list()))
 
         g = conv(x, scope='g_conv', filter_dims=[1, 1, channels // 8], stride_dims=[1, 1], non_linear_fn=act_func)
         print('attention g dims: ' + str(g.get_shape().as_list()))
 
         h = conv(x, scope='h_conv', filter_dims=[1, 1, channels // 8], stride_dims=[1, 1], non_linear_fn=act_func)
-        h = tf.layers.max_pooling2d(h, pool_size=2, strides=2, padding='SAME')
+        h = tf.layers.max_pooling2d(h, pool_size=4, strides=4, padding='SAME')
         print('attention h dims: ' + str(h.get_shape().as_list()))
 
         # N = h * w
@@ -522,8 +522,8 @@ def add_residual_dense_block(in_layer, filter_dims, num_layers, act_func=tf.nn.r
         if use_dilation == True:
             dilation = [1, 2, 2, 1]
 
-        bn_depth = num_channel_in // (num_layers * 2)
-        #bn_depth = bottleneck_depth
+        #bn_depth = num_channel_in // (num_layers * 2)
+        bn_depth = num_channel_in
 
         l = conv(l, scope='bt_conv', filter_dims=[1, 1, bn_depth], stride_dims=[1, 1], dilation=[1, 1, 1, 1],
                     non_linear_fn=None, bias=False, sn=False)
