@@ -669,27 +669,27 @@ def train(model_path):
 
     # High Resolution
     augmented_HR_X_POOL = util.random_augments_hard(HR_X_POOL, probability=augmentation_probability, batch_size=batch_size)
-    pool_hr_Y_feature, pool_hr_Y_logit = hr_discriminator(HR_Y_POOL, augmented_HR_X_POOL, activation='relu', norm='instance', b_train=b_train,
+    pool_hr_Y_feature, pool_hr_Y_logit = hr_discriminator(HR_Y_POOL, augmented_HR_X_POOL, activation='lrelu', norm='instance', b_train=b_train,
                                                           scope=HR_DY_scope, use_patch=use_patch_discriminator)
 
     augmented_HR_Y_IN = util.random_augments_hard(HR_Y_IN, probability=augmentation_probability, batch_size=batch_size)
-    real_hr_Y_feature, real_hr_Y_logit = hr_discriminator(augmented_HR_Y_IN, augmented_HR_X_IN, activation='relu', norm='instance', b_train=b_train,
+    real_hr_Y_feature, real_hr_Y_logit = hr_discriminator(augmented_HR_Y_IN, augmented_HR_X_IN, activation='lrelu', norm='instance', b_train=b_train,
                                                           scope=HR_DY_scope, use_patch=use_patch_discriminator)
 
     augmented_fake_hr_Y = util.random_augments_hard(fake_hr_Y, probability=augmentation_probability, batch_size=batch_size)
-    fake_hr_Y_feature, fake_hr_Y_logit = hr_discriminator(augmented_fake_hr_Y, augmented_HR_X_IN, activation='relu', norm='instance', b_train=b_train,
+    fake_hr_Y_feature, fake_hr_Y_logit = hr_discriminator(augmented_fake_hr_Y, augmented_HR_X_IN, activation='lrelu', norm='instance', b_train=b_train,
                                                           scope=HR_DY_scope, use_patch=use_patch_discriminator)
     # Low Resolution
     augmented_LR_X_POOL = util.random_augments_hard(LR_X_POOL, probability=augmentation_probability, batch_size=batch_size)
-    pool_lr_Y_feature, pool_lr_Y_logit = lr_discriminator(LR_Y_POOL, augmented_LR_X_POOL, activation='relu', norm='instance', b_train=b_train,
+    pool_lr_Y_feature, pool_lr_Y_logit = lr_discriminator(LR_Y_POOL, augmented_LR_X_POOL, activation='lrelu', norm='instance', b_train=b_train,
                                                           scope=LR_DY_scope, use_patch=use_patch_discriminator)
 
     augmented_LR_Y_IN = util.random_augments_hard(LR_Y_IN, probability=augmentation_probability, batch_size=batch_size)
-    real_lr_Y_feature, real_lr_Y_logit = lr_discriminator(augmented_LR_Y_IN, augmented_LR_X_IN, activation='relu', norm='instance', b_train=b_train,
+    real_lr_Y_feature, real_lr_Y_logit = lr_discriminator(augmented_LR_Y_IN, augmented_LR_X_IN, activation='lrelu', norm='instance', b_train=b_train,
                                                           scope=LR_DY_scope, use_patch=use_patch_discriminator)
 
     augmented_fake_lr_Y = util.random_augments_hard(fake_lr_Y, probability=augmentation_probability, batch_size=batch_size)
-    fake_lr_Y_feature, fake_lr_Y_logit = lr_discriminator(augmented_fake_lr_Y, augmented_LR_X_IN, activation='relu', norm='instance', b_train=b_train,
+    fake_lr_Y_feature, fake_lr_Y_logit = lr_discriminator(augmented_fake_lr_Y, augmented_LR_X_IN, activation='lrelu', norm='instance', b_train=b_train,
                                                           scope=LR_DY_scope, use_patch=use_patch_discriminator)
 
     if use_identity_loss is True:
