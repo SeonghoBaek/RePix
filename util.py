@@ -676,27 +676,6 @@ def random_rgb_to_gray(image,
     return image
 
 
-def random_augment_brightness_cutout(images, probability=0.5, seed=None, batch_size=1):
-    with tf.name_scope('RandomAugment', values=[images]):
-        random_prob = tf.random_uniform([], minval=0.0, maxval=1.0, dtype=tf.float32, seed=seed)
-
-        image = tf.cond(tf.greater(random_prob, probability),
-                        lambda: random_adjust_brightness(image=images),
-                        lambda: random_black_patches(image=images, batch_size=batch_size))
-
-        return image
-
-
-def random_augments_hard(images, probability=0.7, seed=None, batch_size=1):
-    with tf.name_scope('RandomAugment', values=[images]):
-        random_prob = tf.random_uniform([], minval=0.0, maxval=1.0, dtype=tf.float32, seed=seed)
-
-        image = tf.cond(tf.greater(random_prob, probability),
-                        lambda: random_black_patches(image=images, batch_size=batch_size),
-                        lambda: random_augments(images=images, probability=probability))
-        return image
-
-
 def random_augments(images, probability=0.5, seed=None):
     with tf.name_scope('RandomAugment', values=[images]):
         random_prob = tf.random_uniform([], minval=0.0, maxval=1.0, dtype=tf.float32, seed=seed)
@@ -718,7 +697,7 @@ def random_augment_brightness_constrast(images, probability=0.2, seed=None):
 
 
 def random_adjust_brightness(image,
-                             max_delta=0.2,
+                             max_delta=0.05,
                              probability=0.5,
                              seed=None):
   """Randomly adjusts brightness.
@@ -748,8 +727,8 @@ def random_adjust_brightness(image,
 
 
 def random_adjust_contrast(image,
-                           min_delta=0.9,
-                           max_delta=1.1,
+                           min_delta=0.95,
+                           max_delta=1.05,
                            probability=0.5,
                            seed=None):
     """Randomly adjusts contrast.
@@ -931,3 +910,38 @@ def random_black_patches(image,
           functools.partial(add_black_patch_to_image, image=image, idx=idx, batch_size=batch_size))
 
     return image
+
+
+def findCosineDistance(source_representation, test_representation):
+    a = np.matmul(np.transpose(source_representation), test_representation)
+    b = np.sum(np.multiply(source_representation, source_representation))
+    c = np.sum(np.multiply(test_representation, test_representation))
+    return 1 - (a / (np.sqrt(b) * np.sqrt(c)))
+
+
+def findEuclideanDistance(source_representation, test_representation):
+    euclidean_distance = source_representation - test_representation
+    euclidean_distance = np.sum(np.multiply(euclidean_distance, euclidean_distance))
+    euclidean_distance = np.sqrt(euclidean_distance)
+    return euclidean_distance
+
+
+# Spherical linear interpolation. low, high are samples are drawn under random normal distribution.
+def slerp(val, low, high):
+    omega = np.arccos(np.clip(np.dot(low/np.linalg.norm(low), high/np.linalg.norm(high)), -1, 1))
+    so = np.sin(omega)
+    if so == 0:
+        return (1.0 - val) * low + val * high
+
+    return np.sin((1.0 - val) * omega) / so * low + np.sin(val * omega) / so * high
+
+
+def interpolate_points(p1, p2, n_steps=10):
+    ratios = np.linspace(0, 1, num=n_steps)
+    vectors = list()
+
+    for ratio in ratios:
+        v = slerp(ratio, p1, p2)
+        vectors.append(v)
+
+    return vectors
