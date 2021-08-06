@@ -1,9 +1,3 @@
-# ==============================================================================
-# Author: Seongho Baek
-# Contact: seonghobaek@gmail.com
-#
-# ==============================================================================
-
 import tensorflow as tf
 
 
@@ -592,8 +586,8 @@ def add_se_residual_block(in_layer, filter_dims, num_layers=2, act_func=tf.nn.re
         # SE Path
         # Squeeze
         sl = global_avg_pool(l, output_length=num_channel_out, scope='squeeze')
-        sl = fc(sl, out_dim=num_channel_out // 16, non_linear_fn=tf.nn.relu, scope='reduction')
-        sl = fc(sl, out_dim=num_channel_out,  non_linear_fn=tf.nn.sigmoid, scope='transform')
+        sl = fc(sl, out_dim=num_channel_out // 8, non_linear_fn=tf.nn.leaky_relu, scope='reduction', use_bias=False)
+        sl = fc(sl, out_dim=num_channel_out,  non_linear_fn=tf.nn.tanh, scope='transform', use_bias=False)
         # Excitation
         sl = tf.expand_dims(sl, axis=1)
         sl = tf.expand_dims(sl, axis=2)
