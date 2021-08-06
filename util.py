@@ -1,9 +1,3 @@
-# ==============================================================================
-# Author: Seongho Baek
-# Contact: seonghobaek@gmail.com
-#
-# ==============================================================================
-
 import math
 import numpy as np
 import tensorflow as tf
@@ -374,7 +368,7 @@ def random_rotation90(image,
 
   with tf.name_scope('RandomRotation90', values=[image]):
     do_a_rot90_random = tf.random_uniform([], seed=seed)
-    do_a_rot90_random = tf.greater(do_a_rot90_random, 0.5)
+    do_a_rot90_random = tf.greater(do_a_rot90_random, 0.3)
 
     # flip image
     image = tf.cond(do_a_rot90_random, lambda: _rot90_image(image),
@@ -676,6 +670,27 @@ def random_rgb_to_gray(image,
     return image
 
 
+def random_augment_brightness_cutout(images, probability=0.5, seed=None, batch_size=1):
+    with tf.name_scope('RandomAugment', values=[images]):
+        random_prob = tf.random_uniform([], minval=0.0, maxval=1.0, dtype=tf.float32, seed=seed)
+
+        image = tf.cond(tf.greater(random_prob, probability),
+                        lambda: random_adjust_brightness(image=images),
+                        lambda: random_black_patches(image=images, batch_size=batch_size))
+
+        return image
+
+
+def random_augments_hard(images, probability=0.5, seed=None, batch_size=1):
+    with tf.name_scope('RandomAugmentHard', values=[images]):
+        random_prob = tf.random_uniform([], minval=0.0, maxval=1.0, dtype=tf.float32, seed=seed)
+
+        image = tf.cond(tf.greater(random_prob, probability),
+                        lambda: random_black_patches(image=images, batch_size=batch_size),
+                        lambda: random_augment_brightness_constrast(images=images, probability=probability))
+        return image
+
+
 def random_augments(images, probability=0.5, seed=None):
     with tf.name_scope('RandomAugment', values=[images]):
         random_prob = tf.random_uniform([], minval=0.0, maxval=1.0, dtype=tf.float32, seed=seed)
@@ -697,8 +712,8 @@ def random_augment_brightness_constrast(images, probability=0.2, seed=None):
 
 
 def random_adjust_brightness(image,
-                             max_delta=0.05,
-                             probability=0.5,
+                             max_delta=0.3,
+                             probability=0.7,
                              seed=None):
   """Randomly adjusts brightness.
   Makes sure the output image is still between 0 and 255.
@@ -721,15 +736,15 @@ def random_adjust_brightness(image,
         tf.greater(random_prob, probability), lambda: image,
         functools.partial(tf.image.adjust_brightness, image=image, delta=delta))
 
-    image = tf.clip_by_value(image, clip_value_min=0.0, clip_value_max=1.0)
+    image = tf.clip_by_value(image, clip_value_min=-1.0, clip_value_max=1.0)
 
     return image
 
 
 def random_adjust_contrast(image,
-                           min_delta=0.95,
-                           max_delta=1.05,
-                           probability=0.5,
+                           min_delta=0.8,
+                           max_delta=1.2,
+                           probability=0.7,
                            seed=None):
     """Randomly adjusts contrast.
     Makes sure the output image is still between 0 and 255.
@@ -756,7 +771,7 @@ def random_adjust_contrast(image,
         image = tf.cond(
             tf.greater(random_prob, probability), lambda: image,
             functools.partial(tf.image.adjust_contrast, images=image, contrast_factor=contrast_factor))
-        image = tf.clip_by_value(image, clip_value_min=0.0, clip_value_max=1.0)
+        image = tf.clip_by_value(image, clip_value_min=-1.0, clip_value_max=1.0)
 
     return image
 
@@ -898,7 +913,9 @@ def random_black_patches(image,
     #print('mask shape: ' + str(mask.get_shape().as_list()))
     mask = mask - tf.image.pad_to_bounding_box(black_box, y_min, x_min,
                                               image_height, image_width)
+    image = (image + 1.0)/2.0
     image = tf.multiply(image, mask)
+    image = 2.0 * image - 1.0
     #print('mask shape: ' + str(mask.get_shape().as_list()))
     return image
 
@@ -940,8 +957,10 @@ def interpolate_points(p1, p2, n_steps=10):
     ratios = np.linspace(0, 1, num=n_steps)
     vectors = list()
 
+    vectors.append(p1)
     for ratio in ratios:
         v = slerp(ratio, p1, p2)
         vectors.append(v)
+    vectors.append(p2)
 
     return vectors
