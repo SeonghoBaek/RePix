@@ -1,3 +1,9 @@
+# ==============================================================================
+# Author: Seongho Baek
+# Contact: seongho.baek@sk.com
+#
+# ==============================================================================
+
 import tensorflow as tf
 
 
@@ -119,7 +125,7 @@ def batch_norm(x, b_train, scope, reuse=False):
 
 
 def coord_conv(input, scope, filter_dims, stride_dims, padding='SAME',
-         non_linear_fn=tf.nn.relu, dilation=[1, 1, 1, 1], bias=False, sn=False):
+         non_linear_fn=tf.nn.relu, dilation=[1, 1, 1, 1], bias=True, sn=False):
     input_dims = input.get_shape().as_list()
     batch_size, height, width, channels = input_dims
 
@@ -153,7 +159,7 @@ def coord_conv(input, scope, filter_dims, stride_dims, padding='SAME',
 
 
 def conv(input, scope, filter_dims, stride_dims, padding='SAME',
-         non_linear_fn=tf.nn.relu, dilation=[1, 1, 1, 1], bias=False, sn=False):
+         non_linear_fn=tf.nn.relu, dilation=[1, 1, 1, 1], bias=True, sn=False):
     input_dims = input.get_shape().as_list()
 
     assert (len(input_dims) == 4)  # batch_size, height, width, num_channels_in
@@ -223,7 +229,7 @@ def batch_norm_conv(x, b_train, scope):
 
 
 def add_dense_layer(layer, filter_dims, act_func=tf.nn.relu, scope='dense_layer', norm='layer',
-                    b_train=False, use_bias=False, dilation=[1, 1, 1, 1], sn=False):
+                    b_train=False, use_bias=True, dilation=[1, 1, 1, 1], sn=False):
     with tf.variable_scope(scope):
         l = layer
         l = conv_normalize(l, norm=norm, b_train=b_train, scope='norm')
@@ -236,7 +242,7 @@ def add_dense_layer(layer, filter_dims, act_func=tf.nn.relu, scope='dense_layer'
 
 
 def add_residual_layer(layer, filter_dims, act_func=tf.nn.relu, scope='residual_layer',
-                       norm='layer', b_train=False, use_bias=False, dilation=[1, 1, 1, 1], sn=False):
+                       norm='layer', b_train=False, use_bias=True, dilation=[1, 1, 1, 1], sn=False):
     with tf.variable_scope(scope):
         l = layer
         l = conv(l, scope='conv', filter_dims=filter_dims, stride_dims=[1, 1],
@@ -250,7 +256,7 @@ def add_residual_layer(layer, filter_dims, act_func=tf.nn.relu, scope='residual_
 
 
 def add_dense_transition_layer(layer, filter_dims, stride_dims=[1, 1], act_func=tf.nn.relu, scope='transition',
-                               norm='layer', b_train=False, use_pool=True, use_bias=False, sn=False):
+                               norm='layer', b_train=False, use_pool=True, use_bias=True, sn=False):
     with tf.variable_scope(scope):
         l = layer
         l = conv_normalize(l, norm=norm, b_train=b_train, scope='norm')
@@ -264,7 +270,7 @@ def add_dense_transition_layer(layer, filter_dims, stride_dims=[1, 1], act_func=
     return l
 
 
-def global_avg_pool(input_data, output_length=1, padding='VALID', use_bias=False, scope='gloval_avg_pool'):
+def global_avg_pool(input_data, output_length=1, padding='VALID', use_bias=True, scope='gloval_avg_pool'):
     input_dims = input_data.get_shape().as_list()
 
     assert (len(input_dims) == 4)  # batch_size, height, width, num_channels_in
@@ -520,7 +526,7 @@ def add_residual_dense_block(in_layer, filter_dims, num_layers, act_func=tf.nn.r
         bn_depth = num_channel_in
 
         l = conv(l, scope='bt_conv', filter_dims=[1, 1, bn_depth], stride_dims=[1, 1], dilation=[1, 1, 1, 1],
-                    non_linear_fn=None, bias=False, sn=False)
+                    non_linear_fn=None, sn=False)
 
         for i in range(num_layers):
             l = add_dense_layer(l, filter_dims=[filter_dims[0], filter_dims[1], bn_depth], act_func=act_func, norm=norm, b_train=b_train,
@@ -566,7 +572,7 @@ def add_se_residual_block(in_layer, filter_dims, num_layers=2, act_func=tf.nn.re
             bn_depth = num_channel_out // (num_layers * 2)
             l = conv(l, scope='bt_conv1', filter_dims=[1, 1, bn_depth], stride_dims=[1, 1],
                      dilation=dilation,
-                     non_linear_fn=None, bias=False, sn=False)
+                     non_linear_fn=None, sn=False)
             l = conv_normalize(l, norm=norm, b_train=b_train, scope='bt_norm1')
             l = act_func(l)
         else:
@@ -580,14 +586,14 @@ def add_se_residual_block(in_layer, filter_dims, num_layers=2, act_func=tf.nn.re
             l = act_func(l)
             l = conv(l, scope='bt_conv2', filter_dims=[1, 1, num_channel_out], stride_dims=[1, 1],
                      dilation=dilation,
-                     non_linear_fn=None, bias=False, sn=False)
+                     non_linear_fn=None, sn=False)
             l = conv_normalize(l, norm=norm, b_train=b_train, scope='bt_norm2')
 
         # SE Path
         # Squeeze
         sl = global_avg_pool(l, output_length=num_channel_out, scope='squeeze')
-        sl = fc(sl, out_dim=num_channel_out // 8, non_linear_fn=tf.nn.leaky_relu, scope='reduction', use_bias=False)
-        sl = fc(sl, out_dim=num_channel_out,  non_linear_fn=tf.nn.tanh, scope='transform', use_bias=False)
+        sl = fc(sl, out_dim=num_channel_out // 8, non_linear_fn=tf.nn.leaky_relu, scope='reduction')
+        sl = fc(sl, out_dim=num_channel_out,  non_linear_fn=tf.nn.sigmoid, scope='transform')
         # Excitation
         sl = tf.expand_dims(sl, axis=1)
         sl = tf.expand_dims(sl, axis=2)
@@ -619,7 +625,7 @@ def add_residual_block(in_layer, filter_dims, num_layers=2, act_func=tf.nn.relu,
             bn_depth = num_channel_out // (num_layers * 2)
             l = conv(l, scope='bt_conv1', filter_dims=[1, 1, bn_depth], stride_dims=[1, 1],
                      dilation=[1, 1, 1, 1],
-                     non_linear_fn=None, bias=False, sn=False)
+                     non_linear_fn=None, sn=False)
             l = conv_normalize(l, norm=norm, b_train=b_train, scope='bt_norm1')
             l = act_func(l)
         else:
@@ -646,7 +652,7 @@ def add_residual_block(in_layer, filter_dims, num_layers=2, act_func=tf.nn.relu,
             l = act_func(l)
             l = conv(l, scope='bt_conv2', filter_dims=[1, 1, num_channel_out], stride_dims=[1, 1],
                      dilation=[1, 1, 1, 1],
-                     non_linear_fn=None, bias=False, sn=False)
+                     non_linear_fn=None, sn=False)
             l = conv_normalize(l, norm=norm, b_train=b_train, scope='bt_norm2')
 
         if use_residual is True:
