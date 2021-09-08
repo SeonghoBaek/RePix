@@ -556,7 +556,8 @@ def train(model_path):
                                                        b_train=b_train, scope=TR_DY_scope, use_patch=use_patch_discriminator)
     # Refinement
     refined_hr_X = hr_refinement(REF_X_IN, activation=ref_act, scope=HR_REF_scope, norm=ref_norm, b_train=b_train)
-    refined_hr_Y = hr_refinement(REF_Y_IN, activation=ref_act, scope=HR_REF_scope, norm=ref_norm, b_train=b_train)
+    augmented_REF_Y_IN = util.random_augment_brightness_constrast(REF_Y_IN, probability=0.5)
+    refined_hr_Y = hr_refinement(augmented_REF_Y_IN, activation=ref_act, scope=HR_REF_scope, norm=ref_norm, b_train=b_train)
     refinement_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=HR_REF_scope)
     refinement_l2_regularizer_hr = tf.add_n([tf.nn.l2_loss(v) for v in refinement_vars if 'bias' not in v.name])
     refinement_identity_loss = get_residual_loss(refined_hr_Y, REF_Y_IN, type='l1')
@@ -786,21 +787,29 @@ def train(model_path):
                 else:
                     trans_alpha = alpha
 
-                if e >= lr_pretrain_epoch:
-                    _, d_loss_hr = sess.run([disc_optimizer_hr, total_disc_loss_hr],
-                                            feed_dict={HR_Y_IN: imgs_Y_hr, HR_X_IN: imgs_X_hr, LR_X_IN: imgs_X_lr, TR_X_IN: imgs_X_tr,
-                                            b_train: True, LR: lr})
-                if e >= tr_pretrain_epoch:
-                    _, d_loss_lr = sess.run([disc_optimizer_lr, total_disc_loss_lr],
-                                            feed_dict={LR_Y_IN: imgs_Y_lr, LR_X_IN: imgs_X_lr, TR_X_IN: imgs_X_tr,
-                                                       b_train: True, LR: lr})
-
                 _, d_loss_tr = sess.run([disc_optimizer_tr, total_disc_loss_tr],
                                         feed_dict={TR_Y_IN: imgs_Y_tr, TR_X_IN: imgs_X_tr,
                                                    b_train: True, LR: lr})
 
+                if e >= lr_pretrain_epoch:
+                    cur_steps = (e - lr_pretrain_epoch) * total_input_size + itr + 1.0
+                    lr = learning_rate * np.cos((np.pi * 7.0 / 16.0) * (cur_steps / total_steps))
+                    _, d_loss_hr = sess.run([disc_optimizer_hr, total_disc_loss_hr],
+                                            feed_dict={HR_Y_IN: imgs_Y_hr, HR_X_IN: imgs_X_hr, LR_X_IN: imgs_X_lr, TR_X_IN: imgs_X_tr,
+                                            b_train: True, LR: lr})
+
+                if e >= tr_pretrain_epoch:
+                    cur_steps = (e - tr_pretrain_epoch) * total_input_size + itr + 1.0
+                    lr = learning_rate * np.cos((np.pi * 7.0 / 16.0) * (cur_steps / total_steps))
+                    _, d_loss_lr = sess.run([disc_optimizer_lr, total_disc_loss_lr],
+                                            feed_dict={LR_Y_IN: imgs_Y_lr, LR_X_IN: imgs_X_lr, TR_X_IN: imgs_X_tr,
+                                                       b_train: True, LR: lr})
+
                 if itr % num_critic == 0:
                     if e >= lr_pretrain_epoch:
+                        cur_steps = (e - lr_pretrain_epoch) * total_input_size + itr + 1.0
+                        lr = learning_rate * np.cos((np.pi * 7.0 / 16.0) * (cur_steps / total_steps))
+
                         _, t_loss_hr, x2y_loss_hr, t_loss_lr = sess.run([trans_optimizer_hr,
                                                                          total_trans_loss_hr, trans_loss_X2Y_hr, total_trans_loss_lr],
                                                                         feed_dict={HR_Y_IN: imgs_Y_hr,
@@ -809,12 +818,12 @@ def train(model_path):
                                                                                    LR_X_IN: imgs_X_lr,
                                                                                    TR_Y_IN: imgs_Y_tr,
                                                                                    TR_X_IN: imgs_X_tr,
-                                                                                   b_train: True, LR: learning_rate, ALPHA: trans_alpha})
+                                                                                   b_train: True, LR: lr, ALPHA: trans_alpha})
 
                         trans_hr = sess.run([fake_hr_Y], feed_dict={HR_X_IN: imgs_X_hr, LR_X_IN: imgs_X_lr, TR_X_IN: imgs_X_tr, b_train: True})
                         _, refine_loss, refined_x = sess.run([refinement_optimizer, refinement_loss, refined_hr_X],
                                                              feed_dict={REF_X_IN: trans_hr[0], REF_Y_IN: imgs_Y_hr,
-                                                                        LR: learning_rate, b_train: True, ALPHA: trans_alpha})
+                                                                        LR: lr, b_train: True, ALPHA: trans_alpha})
 
                         decoded_images_X2Y = refined_x
                         print(util.COLORS.HEADER + ' epoch: ' + str(e) + util.COLORS.ENDC + ', ' +
@@ -823,6 +832,9 @@ def train(model_path):
                               util.COLORS.OKBLUE + 'g_loss_hr: ' + str(x2y_loss_hr) + util.COLORS.ENDC + ', ' +
                               util.COLORS.OKGREEN + 'ref_loss: ' + str(refine_loss) + util.COLORS.ENDC)
                     elif e >= tr_pretrain_epoch:
+                        cur_steps = (e - tr_pretrain_epoch) * total_input_size + itr + 1.0
+                        lr = learning_rate * np.cos((np.pi * 7.0 / 16.0) * (cur_steps / total_steps))
+
                         _, t_loss_lr, x2y_loss_lr = sess.run(
                             [trans_optimizer_lr, total_trans_loss_lr, trans_loss_X2Y_lr],
                             feed_dict={LR_Y_IN: imgs_Y_lr,
